@@ -50,7 +50,7 @@ for ABI in $ABIS; do
     (
         cd "$BUILD"
         "$SRC/Configure" "$TARGET" -D__ANDROID_API__="$API" \
-            no-shared no-tests no-apps no-docs no-engine no-dso no-ui-console \
+            no-shared no-tests no-engine no-dso no-ui-console \
             --prefix="$PREFIX" --openssldir="$PREFIX/ssl" --libdir=lib
         make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" build_libs
         make install_dev
