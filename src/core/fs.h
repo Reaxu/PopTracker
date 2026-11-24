@@ -169,6 +169,11 @@ namespace fs {
 namespace  fs {
     inline path app_path()
     {
+#if defined __ANDROID__
+        // there is no executable; this is where the app's bundled assets get extracted to (see platform/android.cpp)
+        const char* res = getenv("POPTRACKER_APP_PATH");
+        return (res && *res) ? path(res) : path();
+#else
 #if defined _WIN32
         wchar_t result[_MAX_PATH+1];
         if (GetModuleFileNameW(nullptr, result, _MAX_PATH) < 1) {
@@ -202,6 +207,7 @@ namespace  fs {
             return "";
         *slash = 0;
         return result;
+#endif // !__ANDROID__
     }
 
     inline path home_path()

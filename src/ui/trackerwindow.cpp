@@ -2,6 +2,7 @@
 #include "../uilib/hbox.h"
 #include "../uilib/imagebutton.h"
 #include "../core/assets.h"
+#include "../uilib/touch.h"
 
 namespace Ui {
 
@@ -14,6 +15,12 @@ const std::string TrackerWindow::MENU_ALWAYS_ON_TOP = "always-on-top";
 const std::string TrackerWindow::MENU_PACK_SETTINGS = "pack-settings";
 const std::string TrackerWindow::MENU_TOGGLE_AUTOTRACKER = "toggle-autotracker";
 const std::string TrackerWindow::MENU_CYCLE_AUTOTRACKER = "cycle-autotracker";
+const std::string TrackerWindow::MENU_TOGGLE_VISIBILITY = "toggle-visibility";
+const std::string TrackerWindow::MENU_GET_PACKS = "get-packs";
+const std::string TrackerWindow::MENU_IMPORT_PACK = "import-pack";
+const std::string TrackerWindow::MENU_UI_LARGER = "ui-larger";
+const std::string TrackerWindow::MENU_UI_SMALLER = "ui-smaller";
+const std::string TrackerWindow::MENU_HELP = "help";
 
 TrackerWindow::TrackerWindow(const char* title, SDL_Surface* icon, const Position& pos, const Size& size, const WindowConfig& config)
     : Window(title, icon, pos, size, config)
@@ -40,8 +47,14 @@ void TrackerWindow::setTracker([[maybe_unused]] Tracker* tracker)
 void TrackerWindow::setTracker(Tracker* tracker, const std::string& layout)
 {
     if (!tracker) setAutoTrackerState(-1, AutoTracker::State::Unavailable, "", "");
-    removeChild(_view);
-    delete _view;
+    if (_zoomView) {
+        removeChild(_zoomView);
+        delete _zoomView; // deletes _view
+        _zoomView = nullptr;
+    } else {
+        removeChild(_view);
+        delete _view;
+    }
     _view = nullptr;
     if (tracker) {
         _rendered = false;
@@ -54,9 +67,22 @@ void TrackerWindow::setTracker(Tracker* tracker, const std::string& layout)
         if (_overrideUnreachableVisibility)
             _view->setHideUnreachableLocations(_hideUnreachableLocations);
         _rendered = false;
-        addChild(_view);
+        if (Touch::enabled()) {
+            // fit layout to the screen, with pinch-zoom
+            _zoomView = new ZoomView(left, top, std::max(1, _size.width - left), std::max(1, _size.height - top));
+            _zoomView->setBackground(_backgroundColor.a ? _backgroundColor : Color{0, 0, 0});
+            _zoomView->setChild(_view);
+            addChild(_zoomView);
+            if (_menu) raiseChild(_menu); // keep tool bar and its overlays on top
+        } else {
+            addChild(_view);
+        }
 
         _view->onMinSizeChanged += {this, [this](void*) {
+            if (_zoomView) {
+                _zoomView->relayout();
+                return;
+            }
             //Size curSize = Size::FromPosition(_view->getPosition()+_view->getSize());
             Size curSize = getSize();
             Size minSize = Size::FromPosition(_view->getPosition()+_view->getMinSize());
@@ -129,7 +155,9 @@ void TrackerWindow::render(Renderer renderer, int offX, int offY)
         printf("Resizing... (%d,%d)\n", _resizeSize.width, _resizeSize.height);
         Window::setSize(_resizeSize);
         if (_menu) _menu->setSize({_size.width-_menu->getLeft(), _menu->getHeight()});
-        if (_view && _rendered) {
+        if (_zoomView) {
+            _zoomView->setSize({_size.width-_zoomView->getLeft(), _size.height-_zoomView->getTop()});
+        } else if (_view && _rendered) {
             _view->setSize({_size.width-_view->getLeft(), _size.height-_view->getTop()});
         }
 #if 0

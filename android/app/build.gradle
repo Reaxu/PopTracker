@@ -1,0 +1,120 @@
+// PopTracker for Android
+// Before the first build run ../fetch-deps.sh and ../build-openssl.sh (see ../README.md).
+
+plugins {
+    id 'com.android.application'
+}
+
+def popRoot = file("$rootDir/..")          // PopTracker source tree
+def depsDir = file("$rootDir/deps")         // SDL2 & co, OpenSSL
+def useOpenSSLPrefab = project.hasProperty('useOpenSSLPrefab')
+
+// version from CMakeLists.txt "project(PopTracker VERSION x.y.z"
+def popVersion = (file("$popRoot/CMakeLists.txt").text =~ /project\(PopTracker VERSION ([0-9]+)\.([0-9]+)\.([0-9]+)/)[0]
+def popVersionName = "${popVersion[1]}.${popVersion[2]}.${popVersion[3]}"
+def popVersionCode = popVersion[1].toInteger() * 1000000 + popVersion[2].toInteger() * 1000 + popVersion[3].toInteger()
+
+android {
+    namespace 'org.poptracker'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'org.poptracker'
+        minSdk 24
+        targetSdk 35
+        versionCode popVersionCode
+        versionName popVersionName
+
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_shared',
+                          "-DPOPTRACKER_DEPS_DIR=${depsDir.absolutePath}"
+                abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "$popRoot/CMakeLists.txt"
+            version '3.22.1'
+        }
+    }
+
+    buildFeatures {
+        prefab useOpenSSLPrefab
+        buildConfig false
+    }
+
+    sourceSets {
+        main {
+            // SDL's Java glue (org.libsdl.app.*) comes straight from the SDL source tree
+            java.srcDirs += ["$depsDir/SDL2/android-project/app/src/main/java"]
+            // PopTracker's assets/ folder ends up as assets/assets/ in the APK; PopTrackerActivity extracts it
+            assets.srcDirs += [layout.buildDirectory.dir('generated/poptracker-assets').get().asFile]
+        }
+    }
+
+    signingConfigs {
+        // Optional: sign release builds with your own key so updates install over each other.
+        // Set POPTRACKER_KEYSTORE (path), POPTRACKER_KEYSTORE_PASSWORD, POPTRACKER_KEY_ALIAS, POPTRACKER_KEY_PASSWORD.
+        if (System.getenv('POPTRACKER_KEYSTORE')) {
+            own {
+                storeFile file(System.getenv('POPTRACKER_KEYSTORE'))
+                storePassword System.getenv('POPTRACKER_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('POPTRACKER_KEY_ALIAS')
+                keyPassword System.getenv('POPTRACKER_KEY_PASSWORD') ?: System.getenv('POPTRACKER_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            minifyEnabled false
+            // Uses the debug key unless you configure your own (see signingConfigs above and README).
+            signingConfig System.getenv('POPTRACKER_KEYSTORE') ? signingConfigs.own : signingConfigs.debug
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging false
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+def copyPopTrackerAssets = tasks.register('copyPopTrackerAssets', Copy) {
+    from("$popRoot/assets") {
+        exclude '*.ico', '*.svg', 'icon512.png'
+    }
+    into layout.buildDirectory.dir('generated/poptracker-assets/assets')
+}
+tasks.named('preBuild') { dependsOn copyPopTrackerAssets }
+
+tasks.register('checkNativeDeps') {
+    doFirst {
+        if (!file("$depsDir/SDL2/CMakeLists.txt").exists()) {
+            throw new GradleException("SDL2 sources missing. Run android/fetch-deps.sh first.")
+        }
+        if (!useOpenSSLPrefab && !file("$depsDir/openssl/arm64-v8a/lib/libssl.a").exists()) {
+            throw new GradleException("OpenSSL missing. Run android/build-openssl.sh, " +
+                    "or build with -PuseOpenSSLPrefab to use the (older) prebuilt OpenSSL 1.1.1 package.")
+        }
+    }
+}
+tasks.named('preBuild') { dependsOn 'checkNativeDeps' }
+
+dependencies {
+    if (useOpenSSLPrefab) {
+        implementation 'com.android.ndk.thirdparty:openssl:1.1.1q-beta-1'
+    }
+}

@@ -2,59 +2,78 @@
 #include "../uilib/dlg.h"
 #include "../uilib/hbox.h"
 #include "../core/assets.h"
+#include "../uilib/touch.h"
+#include "defaults.h"
 
 namespace Ui {
+
+namespace {
+/// plain container for overlays
+class OverlayContainer final : public Container {
+public:
+    OverlayContainer(int x, int y, int w, int h) : Container(x, y, w, h) {}
+};
+}
 
 DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon, const Position& pos, const Size& size, const WindowConfig& config)
     : TrackerWindow(title, icon, pos, size, config)
 {
-    auto hbox = new HBox(0,0,_size.width,32);
+    const bool touch = Touch::enabled();
+    const int bar = Touch::barHeight(); // 32 on desktop, larger touch targets in touch mode
+    const int btn = bar - 4;
+
+    auto hbox = new HBox(0,0,_size.width,bar);
     hbox->setBackground({0,0,0,255});
     hbox->setPadding(2);
-    hbox->setSpacing(2);
+    hbox->setSpacing(touch ? 4 : 2);
     hbox->setGrow(1,1);
     _menu = hbox;
     addChild(_menu);
     
-    _btnLoad = new ImageButton(0,0,32-4,32-4, asset("load.png"));
+    _btnLoad = new ImageButton(0,0,btn,btn, asset("load.png"));
     _btnLoad->setDarkenGreyscale(false);
     hbox->addChild(_btnLoad);
     _btnLoad->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_LOAD, 0);
     }};
-    
-    _btnReload = new ImageButton(0,0,32-4,32-4, asset("reload.png"));
-    _btnReload->setVisible(false);
-    hbox->addChild(_btnReload);
-    _btnReload->onClick += { this, [this](void*, int, int, int) {
-        onMenuPressed.emit(this, MENU_RELOAD, 0);
-    }};
-    
-    _btnImport = new ImageButton(0,0,32-4,32-4, asset("import.png"));
-    _btnImport->setVisible(false);
-    hbox->addChild(_btnImport);
-    _btnImport->onClick += { this, [this](void*, int, int, int) {
-        onMenuPressed.emit(this, MENU_LOAD_STATE, 0);
-    }};
 
-    _btnExport = new ImageButton(0,0,32-4,32-4, asset("export.png"));
-    _btnExport->setVisible(false);
-    hbox->addChild(_btnExport);
-    _btnExport->onClick += { this, [this](void*, int, int, int) {
-        onMenuPressed.emit(this, MENU_SAVE_STATE, 0);
-    }};
+    // in touch mode, reload/import/export live in the menu to save space
+    if (!touch) {
+        _btnReload = new ImageButton(0,0,btn,btn, asset("reload.png"));
+        _btnReload->setVisible(false);
+        hbox->addChild(_btnReload);
+        _btnReload->onClick += { this, [this](void*, int, int, int) {
+            onMenuPressed.emit(this, MENU_RELOAD, 0);
+        }};
+
+        _btnImport = new ImageButton(0,0,btn,btn, asset("import.png"));
+        _btnImport->setVisible(false);
+        hbox->addChild(_btnImport);
+        _btnImport->onClick += { this, [this](void*, int, int, int) {
+            onMenuPressed.emit(this, MENU_LOAD_STATE, 0);
+        }};
+
+        _btnExport = new ImageButton(0,0,btn,btn, asset("export.png"));
+        _btnExport->setVisible(false);
+        hbox->addChild(_btnExport);
+        _btnExport->onClick += { this, [this](void*, int, int, int) {
+            onMenuPressed.emit(this, MENU_SAVE_STATE, 0);
+        }};
+    }
 
 #ifndef __EMSCRIPTEN__ // no multi-window support (yet)
-    _btnBroadcast = new ImageButton(0,0,32-4,32-4, asset("broadcast.png"));
-    _btnBroadcast->setVisible(false);
-    hbox->addChild(_btnBroadcast);
-    _btnBroadcast->onClick += { this, [this](void*, int, int, int) {
-        onMenuPressed.emit(this, MENU_BROADCAST, 0);
-    }};
+    if (!Touch::singleWindow()) {
+        _btnBroadcast = new ImageButton(0,0,btn,btn, asset("broadcast.png"));
+        _btnBroadcast->setVisible(false);
+        hbox->addChild(_btnBroadcast);
+        _btnBroadcast->onClick += { this, [this](void*, int, int, int) {
+            onMenuPressed.emit(this, MENU_BROADCAST, 0);
+        }};
+    }
 #endif
 
-    if (config.showAlwaysOnTopButton()) {
-        _btnAlwaysOnTop = new ImageButton(0,0,32-4,32-4, asset("always_on_top.png"));
+    if (config.showAlwaysOnTopButton() && !Touch::singleWindow()) {
+        _btnAlwaysOnTop = new ImageButton(0,0,btn,btn, asset("always_on_top.png"));
         hbox->addChild(_btnAlwaysOnTop);
         _btnAlwaysOnTop->onClick += { this, [this](void *s, int, int, int) {
             ImageButton* btn = (ImageButton*)s;
@@ -63,25 +82,45 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
         }};
     }
     
-    _btnPackSettings = new ImageButton(32-4,0,32-4,32-4, asset("settings.png"));
+    _btnPackSettings = new ImageButton(btn,0,btn,btn, asset("settings.png"));
     _btnPackSettings->setVisible(false);
     hbox->addChild(_btnPackSettings);
     _btnPackSettings->onClick += { this, [this](void*, int, int, int) {
         onMenuPressed.emit(this, MENU_PACK_SETTINGS, 0);
     }};
 
-    _hboxAutoTrackers = new HBox(0,0,0,32-4);
+    _hboxAutoTrackers = new HBox(0,0,0,btn);
     _hboxAutoTrackers->setPadding(4);
-    _hboxAutoTrackers->setSpacing(6);
+    _hboxAutoTrackers->setSpacing(touch ? 10 : 6);
     hbox->addChild(_hboxAutoTrackers);
 
     _lblTooltip = new Label(0,0,0,0,_font,"");
-    _lblTooltip->setHeight(32-4);
+    _lblTooltip->setHeight(btn);
     _lblTooltip->setGrow(1,1);
     _lblTooltip->setTextAlignment(Label::HAlign::RIGHT, Label::VAlign::MIDDLE);
     hbox->addChild(_lblTooltip);
 
-    _lblMessage = new Label(0,36,_size.width,0, _font, "");
+    if (touch) {
+        // "Fit" shows up while the layout is zoomed in, tap to see everything again
+        _btnFit = new Button(0,0,0,btn, _font, " Fit ");
+        _btnFit->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+        _btnFit->setMinSize({std::max(_btnFit->getMinWidth(), 48), btn});
+        _btnFit->setSize({std::max(_btnFit->getMinWidth(), 48), btn});
+        _btnFit->setVisible(false);
+        hbox->addChild(_btnFit);
+        _btnFit->onClick += { this, [this](void*, int, int, int) {
+            resetZoom();
+        }};
+
+        _btnMenu = new ImageButton(0,0,btn,btn, asset("menu.png"));
+        _btnMenu->setDarkenGreyscale(false);
+        hbox->addChild(_btnMenu);
+        _btnMenu->onClick += { this, [this](void*, int, int, int) {
+            showMenu();
+        }};
+    }
+
+    _lblMessage = new Label(0,bar+4,_size.width,0, _font, "");
     _lblMessage->setVisible(false);
     _lblMessage->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::TOP);
     addChild(_lblMessage);
@@ -102,7 +141,44 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
     _loadPackWidget->onPackSelected += {this,[this](void *, const fs::path& pack, const std::string& variant) {
         onPackSelected.emit(this,pack,variant);
     }};
+    _loadPackWidget->onGetPacks += {this, [this](void*) {
+        onMenuPressed.emit(this, MENU_GET_PACKS, 0);
+    }};
+    _loadPackWidget->onImportPack += {this, [this](void*) {
+        onMenuPressed.emit(this, MENU_IMPORT_PACK, 0);
+    }};
+    _loadPackWidget->onClose += {this, [this](void*) {
+        hideOpen();
+    }};
+
+    if (touch) {
+        auto menuFont = _fontStore->getFont(DEFAULT_FONT_NAME, DEFAULT_FONT_SIZE + 2);
+        if (!menuFont) menuFont = _font;
+        _mobileMenu = new MobileMenu(0, 0, _size.width, _size.height, menuFont);
+        _mobileMenu->setPanelTop(bar);
+        _mobileMenu->setVisible(false);
+        addChild(_mobileMenu);
+        _mobileMenu->onSelected += {this, [this](void*, const std::string& id, int index) {
+            onMenuPressed.emit(this, id, index);
+        }};
+
+        _packBrowser = new PackBrowser(0, 0, _size.width, _size.height, menuFont, _font, this);
+        _packBrowser->setVisible(false);
+        addChild(_packBrowser);
+        _packBrowser->onClose += {this, [this](void*) {
+            hidePackBrowser();
+        }};
+        _packBrowser->onInstall += {this, [this](void*, const std::string& uid, const std::string& name) {
+            onInstallPack.emit(this, uid, name);
+        }};
+    }
     
+    // fixed size icons; HBox may shrink children to their min size when distributing space
+    for (auto b : {_btnLoad, _btnReload, _btnImport, _btnExport, _btnBroadcast, _btnAlwaysOnTop, _btnPackSettings, _btnMenu}) {
+        if (b) b->setMinSize({btn, btn});
+    }
+    hbox->relayout();
+
     for (const auto& pair : {
             std::pair{_btnLoad, "Load Pack"},
             std::pair{_btnReload, "Reload Pack"},
@@ -113,8 +189,13 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
     }) {
         if (!pair.first) continue;
         pair.first->setDarkenGreyscale(false);
-        pair.first->setEnabled(false); // make greyscale
         const char* text = pair.second; // pointer to program memory
+        if (touch) {
+            // no hover on touch screens: always show in color
+            pair.first->setEnabled(true);
+            continue;
+        }
+        pair.first->setEnabled(false); // make greyscale
         pair.first->onMouseEnter += {this, [this,text](void *s, int, int, unsigned)
         {
             ImageButton* btn = (ImageButton*)s;
@@ -175,7 +256,23 @@ void DefaultTrackerWindow::setTracker(Tracker* tracker, const std::string& layou
     if (_view && _view->getTracker() == tracker && _view->getLayoutRoot() == layout)
         return;
 
+    if (_tracker != tracker) {
+        // settings view references the old tracker: delete now
+        hidePackSettings();
+        for (auto w : _pendingDelete) {
+            removeChild(w);
+            delete w;
+        }
+        _pendingDelete.clear();
+    }
+    _tracker = tracker;
     TrackerWindow::setTracker(tracker, layout);
+    if (_zoomView) {
+        _zoomView->onZoomChanged += {this, [this](void*, float) {
+            updateFitButton();
+        }};
+    }
+    updateFitButton();
     if (tracker) {
         hideMessage();
         tracker->onLayoutChanged -= this;
@@ -215,6 +312,9 @@ void DefaultTrackerWindow::setTracker(Tracker* tracker, const std::string& layou
         if (_btnExport) _btnExport->setVisible(false);
     }
     raiseChild(_loadPackWidget);
+    if (_settingsOverlay) raiseChild(_settingsOverlay);
+    if (_packBrowser) raiseChild(_packBrowser);
+    if (_mobileMenu) raiseChild(_mobileMenu);
 }
 
 void DefaultTrackerWindow::showMessage(const std::string& message, bool error)
@@ -235,6 +335,14 @@ void DefaultTrackerWindow::hideMessage()
 
 void DefaultTrackerWindow::render(Renderer renderer, int offX, int offY)
 {
+    if (!_pendingDelete.empty()) {
+        auto pending = std::move(_pendingDelete);
+        _pendingDelete.clear();
+        for (auto w : pending) {
+            removeChild(w);
+            delete w;
+        }
+    }
     if (_view) {
         float oldAspectRatio = _aspectRatio;
         _aspectRatio = (float)getWidth() / (float)getHeight();
@@ -279,7 +387,7 @@ void DefaultTrackerWindow::setAutoTrackerState(int index, AutoTracker::State sta
         _autoTrackerSubNames[index] = subname;
     } else {
         printf("adding label #%d \"%s\"\n", index, name.c_str());
-        lbl = new Label(0,0,0,32-4,_font, name);
+        lbl = new Label(0,0,0,Touch::barHeight()-4,_font, name);
         lbl->setWidth(lbl->getAutoWidth());
         lbl->setTextColor({0,0,0});
         lbl->onClick += {this, [this,index](void*, int, int, int button) {
@@ -345,6 +453,7 @@ void DefaultTrackerWindow::setSize(Size size)
     TrackerWindow::setSize(size);
     _lblMessage->setWidth(size.width);
     _loadPackWidget->setSize(size);
+    layoutOverlays(size);
     if (_vboxProgress) {
         _vboxProgress->setPosition({
             (_size.width - _vboxProgress->getWidth())/2,
@@ -362,7 +471,9 @@ void DefaultTrackerWindow::showOpen()
 {
     _loadPackWidget->update();
     _loadPackWidget->setVisible(true);
-    _loadPackWidget->focusFilter();
+    raiseChild(_loadPackWidget);
+    if (!Touch::enabled()) // don't pop up the on-screen keyboard
+        _loadPackWidget->focusFilter();
 }
 void DefaultTrackerWindow::hideOpen()
 {
@@ -433,5 +544,209 @@ void DefaultTrackerWindow::setAlwaysOnTop(bool alwaysOnTop)
     TrackerWindow::setAlwaysOnTop(alwaysOnTop);
 }
 
-} // namespace
+void DefaultTrackerWindow::updateFitButton()
+{
+    if (!_btnFit)
+        return;
+    const bool zoomed = _zoomView && _zoomView->isZoomed();
+    if (_btnFit->getVisible() != zoomed)
+        _btnFit->setVisible(zoomed);
+}
 
+void DefaultTrackerWindow::layoutOverlays(Size size)
+{
+    const int bar = Touch::barHeight();
+    if (_mobileMenu) {
+        _mobileMenu->setPosition({0, 0});
+        _mobileMenu->setPanelTop(bar);
+        _mobileMenu->setSize(size);
+    }
+    if (_packBrowser) {
+        _packBrowser->setPosition({0, 0});
+        _packBrowser->setSize(size);
+    }
+    if (_settingsOverlay) {
+        _settingsOverlay->setPosition({0, 0});
+        _settingsOverlay->setSize(size);
+        // children: [0] header bar, [1] zoom view
+        const auto& children = _settingsOverlay->getChildren();
+        if (children.size() >= 2) {
+            auto header = dynamic_cast<HBox*>(children[0]);
+            if (header)
+                header->setSize({size.width, bar});
+            if (_settingsZoom) {
+                _settingsZoom->setPosition({0, bar});
+                _settingsZoom->setSize({size.width, std::max(1, size.height - bar)});
+            }
+        }
+    }
+}
+
+void DefaultTrackerWindow::showMenu()
+{
+    if (!_mobileMenu)
+        return;
+    std::vector<MobileMenu::Entry> entries;
+    entries.push_back({MENU_LOAD, 0, "Load pack"});
+    entries.push_back({MENU_GET_PACKS, 0, "Get more packs"});
+    entries.push_back({MENU_IMPORT_PACK, 0, "Import pack from file (.zip)"});
+    if (_tracker) {
+        entries.push_back({"", 0, "This pack", true});
+        if (_tracker->hasLayout("settings_popup"))
+            entries.push_back({MENU_PACK_SETTINGS, 0, "Pack settings"});
+        entries.push_back({MENU_RELOAD, 0, "Reload pack"});
+        entries.push_back({MENU_TOGGLE_VISIBILITY, 0,
+                _menuLocationsHidden ? "Show cleared locations" : "Hide cleared locations"});
+        entries.push_back({MENU_SAVE_STATE, 0, "Export state..."});
+        entries.push_back({MENU_LOAD_STATE, 0, "Import state..."});
+        bool atHeader = false;
+        for (size_t i = 0; i < _autoTrackerStates.size(); i++) {
+            const auto state = _autoTrackerStates[i];
+            if (state == AutoTracker::State::Unavailable)
+                continue;
+            if (!atHeader) {
+                entries.push_back({"", 0, "Auto tracking", true});
+                atHeader = true;
+            }
+            std::string name = _autoTrackerNames[i].empty() ? "Auto Tracker" : _autoTrackerNames[i];
+            const char* action = state == AutoTracker::State::Disabled ? "Connect " : "Disconnect ";
+            const char* status = state == AutoTracker::State::Disconnected ? " (offline)" :
+                                 state == AutoTracker::State::BridgeConnected ? " (no game)" :
+                                 state == AutoTracker::State::ConsoleConnected ? " (online)" : "";
+            entries.push_back({MENU_TOGGLE_AUTOTRACKER, (int)i, action + name + status});
+        }
+    }
+    entries.push_back({"", 0, "View", true});
+    if (_zoomView && _zoomView->isZoomed())
+        entries.push_back({"reset-zoom", 0, "Fit tracker to screen"});
+    entries.push_back({MENU_UI_LARGER, 0, "Larger UI"});
+    entries.push_back({MENU_UI_SMALLER, 0, "Smaller UI"});
+    entries.push_back({MENU_HELP, 0, "Help"});
+    _mobileMenu->onSelected -= this;
+    _mobileMenu->onSelected += {this, [this](void*, const std::string& id, int index) {
+        if (id == "reset-zoom")
+            resetZoom();
+        else
+            onMenuPressed.emit(this, id, index);
+    }};
+    _mobileMenu->setEntries(entries);
+    _mobileMenu->setVisible(true);
+    raiseChild(_mobileMenu);
+}
+
+void DefaultTrackerWindow::showPackBrowser()
+{
+    if (!_packBrowser)
+        return;
+    _packBrowser->setLoading();
+    _packBrowser->setVisible(true);
+    raiseChild(_packBrowser);
+}
+
+void DefaultTrackerWindow::setPackBrowserPacks(const nlohmann::json& packs, const std::set<std::string>& installedUids)
+{
+    if (_packBrowser)
+        _packBrowser->setPacks(packs, installedUids);
+}
+
+void DefaultTrackerWindow::setPackBrowserError(const std::string& message)
+{
+    if (_packBrowser)
+        _packBrowser->setError(message);
+}
+
+void DefaultTrackerWindow::hidePackBrowser()
+{
+    if (!_packBrowser)
+        return;
+    _packBrowser->releaseFocus();
+    _packBrowser->setVisible(false);
+}
+
+void DefaultTrackerWindow::showPackSettings(Tracker* tracker)
+{
+    if (!tracker || !tracker->hasLayout("settings_popup"))
+        return;
+    hidePackSettings();
+    const int bar = Touch::barHeight();
+
+    _settingsOverlay = new OverlayContainer(0, 0, _size.width, _size.height);
+    _settingsOverlay->setBackground({0x40, 0x40, 0x40});
+
+    auto header = new HBox(0, 0, _size.width, bar);
+    header->setBackground({0, 0, 0});
+    header->setPadding(2);
+    header->setSpacing(8);
+    auto btnClose = new Button(0, 0, 0, bar - 4, _font, "  Close  ");
+    btnClose->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+    btnClose->setMinSize({std::max(btnClose->getMinWidth(), 72), bar - 4});
+    btnClose->setSize({std::max(btnClose->getMinWidth(), 72), bar - 4});
+    header->addChild(btnClose);
+    auto title = new Label(0, 0, 0, bar - 4, _font, "Pack settings");
+    title->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
+    title->setGrow(1, 0);
+    header->addChild(title);
+    _settingsOverlay->addChild(header);
+    btnClose->onClick += {this, [this](void*, int, int, int) {
+        hidePackSettings(true); // we are inside the overlay's click handler, delete later
+    }};
+
+    _settingsView = new TrackerView(0, 0, 100, 100, tracker, "settings_popup", _fontStore);
+    _settingsZoom = new ZoomView(0, bar, _size.width, std::max(1, _size.height - bar));
+    _settingsZoom->setBackground({0x7f, 0x7f, 0x7f});
+    _settingsZoom->setMaxFit(2.0f); // settings are usually small; make them easy to tap
+    _settingsZoom->setChild(_settingsView);
+    _settingsView->onMinSizeChanged += {this, [this](void*) {
+        if (_settingsZoom)
+            _settingsZoom->relayout();
+    }};
+    _settingsOverlay->addChild(_settingsZoom);
+
+    addChild(_settingsOverlay);
+    layoutOverlays(_size);
+    if (_mobileMenu) raiseChild(_mobileMenu);
+}
+
+void DefaultTrackerWindow::hidePackSettings(bool deferred)
+{
+    if (!_settingsOverlay)
+        return;
+    if (deferred) {
+        _settingsOverlay->setVisible(false);
+        _pendingDelete.push_back(_settingsOverlay);
+    } else {
+        removeChild(_settingsOverlay);
+        delete _settingsOverlay; // deletes zoom view and settings view
+    }
+    _settingsOverlay = nullptr;
+    _settingsZoom = nullptr;
+    _settingsView = nullptr;
+}
+
+bool DefaultTrackerWindow::handleBack()
+{
+    // close the top-most overlay
+    if (_mobileMenu && _mobileMenu->getVisible()) {
+        _mobileMenu->setVisible(false);
+        return true;
+    }
+    if (_packBrowser && _packBrowser->getVisible()) {
+        hidePackBrowser();
+        return true;
+    }
+    if (_settingsOverlay) {
+        hidePackSettings();
+        return true;
+    }
+    if (_loadPackWidget && _loadPackWidget->getVisible() && _view) {
+        hideOpen();
+        return true;
+    }
+    if (_zoomView && _zoomView->isZoomed()) {
+        resetZoom();
+        return true;
+    }
+    return false;
+}
+
+} // namespace

@@ -6,6 +6,7 @@
 #include "../core/fileutil.h"
 #include "droptype.h"
 #include "timer.h"
+#include "touch.h"
 
 
 #if defined __LINUX__ || defined __FREEBSD__ || defined __OPENBSD__ || defined __NETBSD__
@@ -42,6 +43,11 @@ Ui::Ui(const char *name, bool fallbackRenderer, const bool vsync)
 #endif
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "Error initializing SDL: %s\n", SDL_GetError());
+    }
+
+    if (Touch::enabled()) {
+        // we turn finger events into gestures ourselves (see touch.cpp)
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     }
 
     if (_fallbackRenderer) {
@@ -129,9 +135,9 @@ int Ui::eventFilter(void* userdata, SDL_Event *ev)
             int x = ev->window.data1;
             int y = ev->window.data2;
             auto winit = ui->_windows.find(ev->window.windowID);
-            if (winit != ui->_windows.end()) {
+            if (winit != ui->_windows.end() && !ui->_backgrounded) {
                 // NOTE: calls below may push new events, looping is disabled using the try_lock above
-                winit->second->setSize({x,y});
+                winit->second->onPixelSizeChanged({x,y});
                 winit->second->render();
             }
             ui->_eventMutex.unlock();
@@ -177,6 +183,7 @@ bool Ui::render()
         SDL_Delay(1); // let the kernel switch tasks to fill the event queue
 #endif
         bool destructiveEvent = false;
+        updateTouch(); // long press
         
         // Work around SDL eating mouse input when switching windows
         // read below at SDL_WINDOWEVENT_FOCUS_GAINED
@@ -217,55 +224,121 @@ bool Ui::render()
                     return false;
                 }
                 case SDL_MOUSEBUTTONDOWN: {
+                    if (Touch::enabled() && ev.button.which == SDL_TOUCH_MOUSEID)
+                        break; // handled as finger event
                     // clear/cancel cached "global" event (see above or below)
                     _globalMouseButtons = 0;
                     const int button = ev.button.button;
-                    const int x = ev.button.x;
-                    const int y = ev.button.y;
                     auto winIt = _windows.find(ev.button.windowID);
                     if (winIt != _windows.end()) {
+                        const float s = winIt->second->getUiScale();
+                        const int x = (int)(ev.button.x / s);
+                        const int y = (int)(ev.button.y / s);
                         winIt->second->onMouseDown.emit(winIt->second, x, y, button);
                     }
                     break;
                 }
                 case SDL_MOUSEBUTTONUP: {
+                    if (Touch::enabled() && ev.button.which == SDL_TOUCH_MOUSEID)
+                        break; // handled as finger event
                     EVENT_LOCK(this);
                     const int button = ev.button.button;
-                    const int x = ev.button.x;
-                    const int y = ev.button.y;
                     auto winIt = _windows.find(ev.button.windowID);
                     if (winIt != _windows.end()) {
+                        const float s = winIt->second->getUiScale();
+                        const int x = (int)(ev.button.x / s);
+                        const int y = (int)(ev.button.y / s);
                         winIt->second->onClick.emit(winIt->second, x, y, button);
                     }
                     EVENT_UNLOCK(this);
                     break;
                 }
                 case SDL_MOUSEMOTION: {
+                    if (Touch::enabled() && ev.motion.which == SDL_TOUCH_MOUSEID)
+                        break; // handled as finger event
                     EVENT_LOCK(this);
                     unsigned buttons = ev.motion.state;
-                    int x = ev.motion.x;
-                    int y = ev.motion.y;
                     auto winIt = _windows.find(ev.motion.windowID);
                     if (winIt != _windows.end()) {
+                        const float s = winIt->second->getUiScale();
+                        const int x = (int)(ev.motion.x / s);
+                        const int y = (int)(ev.motion.y / s);
                         winIt->second->onMouseMove.emit(winIt->second, x, y, buttons);
                     }
                     EVENT_UNLOCK(this);
                     break;
                 }
                 case SDL_MOUSEWHEEL: {
+                    if (Touch::enabled() && ev.wheel.which == SDL_TOUCH_MOUSEID)
+                        break;
                     EVENT_LOCK(this);
                     int x = ev.wheel.x * 48;
                     int y = ev.wheel.y * 48;
                     unsigned mod = 0;
-                    auto winIt = _windows.find(ev.motion.windowID);
+                    auto winIt = _windows.find(ev.wheel.windowID);
                     if (winIt != _windows.end()) {
-                        winIt->second->onScroll.emit(winIt->second, x, y, mod);
+                        Window* win = winIt->second;
+                        if (Touch::enabled() && (SDL_GetModState() & KMOD_CTRL) && ev.wheel.y) {
+                            // ctrl + wheel = pinch zoom, for touch mode on desktop
+                            int mx = 0, my = 0;
+                            SDL_GetMouseState(&mx, &my);
+                            const float s = win->getUiScale();
+                            win->touchZoom((int)(mx / s), (int)(my / s), ev.wheel.y > 0 ? 1.25f : 0.8f);
+                        } else {
+                            win->onScroll.emit(win, x, y, mod);
+                        }
                     }
                     EVENT_UNLOCK(this);
                     break;
                 }
+                case SDL_FINGERDOWN:
+                case SDL_FINGERMOTION:
+                case SDL_FINGERUP: {
+                    if (!Touch::enabled())
+                        break; // SDL synthesizes mouse events for us
+                    EVENT_LOCK(this);
+                    handleFingerEvent(ev);
+                    EVENT_UNLOCK(this);
+                    break;
+                }
+                case SDL_APP_WILLENTERBACKGROUND:
+                case SDL_APP_DIDENTERBACKGROUND: {
+                    if (!_backgrounded) {
+                        printf("Ui: entering background\n");
+                        _backgrounded = true;
+                        onAppBackground.emit(this);
+                    }
+                    break;
+                }
+                case SDL_APP_WILLENTERFOREGROUND:
+                case SDL_APP_DIDENTERFOREGROUND: {
+                    if (_backgrounded) {
+                        printf("Ui: entering foreground\n");
+                        _backgrounded = false;
+                        destructiveEvent = true; // redraw
+                    }
+                    break;
+                }
+                case SDL_APP_LOWMEMORY:
+                case SDL_APP_TERMINATING: {
+                    onAppBackground.emit(this); // save what we can
+                    break;
+                }
+                case SDL_RENDER_TARGETS_RESET:
+                case SDL_RENDER_DEVICE_RESET: {
+                    fprintf(stderr, "Ui: render device/targets reset (%u)\n", (unsigned)ev.type);
+                    break;
+                }
                 case SDL_KEYDOWN: {
                     EVENT_LOCK(this);
+                    if (!ev.key.repeat && (ev.key.keysym.sym == SDLK_AC_BACK ||
+                            (Touch::enabled() && ev.key.keysym.sym == SDLK_ESCAPE &&
+                             !(_windows.count(ev.key.windowID) && _windows[ev.key.windowID]->getKeyboardFocus())))) {
+                        auto winIt = _windows.find(ev.key.windowID);
+                        handleBack(winIt != _windows.end() ? winIt->second : nullptr);
+                        EVENT_UNLOCK(this);
+                        break;
+                    }
                     if (!ev.key.repeat) {
                         int key = (int)ev.key.keysym.sym;
                         const uint16_t mask = KMOD_CTRL | KMOD_SHIFT | KMOD_GUI;
@@ -335,7 +408,7 @@ bool Ui::render()
                         int y = ev.window.data2;
                         auto winit = _windows.find(ev.window.windowID);
                         if (winit != _windows.end()) {
-                            winit->second->setSize({x,y});
+                            winit->second->onPixelSizeChanged({x,y});
                             destructiveEvent = true;
                         }
                         EVENT_UNLOCK(this);
@@ -454,6 +527,12 @@ bool Ui::render()
     } while (_fpsLimit && (FRAME_TIME>_lastRenderDuration && t1-t0+1 < FRAME_TIME-_lastRenderDuration)); // TODO: microseconds?
 #endif
     
+    if (_backgrounded) {
+        // no surface to draw to (Android); keep networking alive but don't spin
+        SDL_Delay(50);
+        return true;
+    }
+
     {
         EVENT_LOCK(this);
         for (auto win: _windows)

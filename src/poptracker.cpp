@@ -19,6 +19,11 @@
 #include "uilib/imghelper.h"
 #include "ui/maptooltip.h"
 #include "core/fs.h"
+#include "uilib/touch.h"
+#include <cmath>
+#ifdef __ANDROID__
+#include "platform/android.h"
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
@@ -237,12 +242,22 @@ PopTracker::PopTracker([[maybe_unused]] int argc, [[maybe_unused]] char** argv, 
         _config["software_renderer"] = false;
     if (!_config["vsync"].is_boolean())
         _config["vsync"] = false;
-    if (_config["enable_screensaver"].type() != json::value_t::boolean)
+    if (_config["enable_screensaver"].type() != json::value_t::boolean) {
+#ifdef __ANDROID__
+        _config["enable_screensaver"] = false; // keep the screen on while tracking
+#else
         _config["enable_screensaver"] = true;
+#endif
+    }
     if (!_config["show_always_on_top_button"].is_boolean())
         _config["show_always_on_top_button"] = nullptr;
     if (_config["ignore_hidpi"].type() != json::value_t::boolean)
         _config["ignore_hidpi"] = false;
+    // touch friendly UI: always on Android, opt-in on desktop (config or POPTRACKER_TOUCH_UI=1)
+    if (!_config["touch_ui"].is_boolean())
+        _config["touch_ui"] = nullptr;
+    if (!_config["ui_scale_factor"].is_number())
+        _config["ui_scale_factor"] = 1.0;
 
     if (!cli) {
         // enable logging
@@ -509,9 +524,42 @@ bool PopTracker::start()
     }
 #endif
 
+#ifdef __ANDROID__
+    Ui::Touch::setEnabled(true);
+    Ui::Touch::setSingleWindow(true);
+#else
+    {
+        const char* env = getenv("POPTRACKER_TOUCH_UI");
+        bool touch = _config["touch_ui"].is_boolean() && _config["touch_ui"].get<bool>();
+        if (env && *env)
+            touch = strcmp(env, "0") != 0;
+        Ui::Touch::setEnabled(touch);
+    }
+#endif
+
     _ui = new Ui::Ui(APPNAME,
         _config["software_renderer"] ? true : false,
         _config["vsync"] ? true : false);
+
+    if (Ui::Touch::enabled()) {
+        // UI scale = display density (Android dp) * user factor from the menu
+        float autoScale = 1.0f;
+#ifdef __ANDROID__
+        float ddpi = 0;
+        if (SDL_GetDisplayDPI(0, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
+            autoScale = ddpi / 160.0f;
+#endif
+        if (const char* env = getenv("POPTRACKER_UI_SCALE"))
+            autoScale = (float)atof(env) > 0 ? (float)atof(env) : autoScale;
+        _autoUiScale = autoScale;
+        float factor = _config["ui_scale_factor"].get<float>();
+        if (factor < 0.5f || factor > 3.0f)
+            factor = 1.0f;
+        const float scale = std::max(0.5f, autoScale * factor);
+        Ui::Touch::setRequestedScale(scale);
+        Ui::Touch::setTextScale((int)std::ceil(scale - 0.05f)); // sharp text when scaled up
+        printf("Touch UI enabled, scale %.2f, text scale %d\n", scale, Ui::Touch::textScale());
+    }
     _ui->setFPSLimit(_config["fps_limit"].get<unsigned>(), _config["software_fps_limit"].get<unsigned>());
     _ui->onWindowDestroyed += {this, [this](void*, Ui::Window *win) {
         if (win == _broadcast) {
@@ -526,23 +574,7 @@ bool PopTracker::start()
     }};
     _ui->onHotkey += {this, [this](void*, const Ui::Ui::Hotkey& hotkey) {
         if (hotkey.id == HOTKEY_TOGGLE_VISIBILITY) {
-            // until packs provide a default, we just toggle between "unset" and "hidden"
-            auto it = _config.find("hide_cleared_locations");
-            if (it == _config.end() || !it.value().is_boolean() || it.value() == false) {
-                _config["hide_cleared_locations"] = true;
-                _config["hide_unreachable_locations"] = true;
-                if (_win) _win->setHideClearedLocations(true);
-                if (_win) _win->setHideUnreachableLocations(true);
-                if (_broadcast) _broadcast->setHideClearedLocations(true);
-                if (_broadcast) _broadcast->setHideUnreachableLocations(true);
-            } else {
-                _config["hide_cleared_locations"] = json::value_t::null;
-                _config["hide_unreachable_locations"] = json::value_t::null;
-                if (_win) _win->unsetHideClearedLocations();
-                if (_win) _win->unsetHideUnreachableLocations();
-                if (_broadcast) _broadcast->unsetHideClearedLocations();
-                if (_broadcast) _broadcast->unsetHideUnreachableLocations();
-            }
+            toggleLocationVisibility();
         }
         else if (hotkey.id == HOTKEY_RELOAD) {
             reloadTracker();
@@ -555,13 +587,27 @@ bool PopTracker::start()
             _config["split_map_locations"] = Ui::MapWidget::SplitRects;
         }
         else if (hotkey.id == HOTKEY_SHOW_BROADCAST) {
-            showBroadcast();
+            if (!Ui::Touch::singleWindow())
+                showBroadcast();
         }
         else if (hotkey.id == HOTKEY_SHOW_HELP) {
             if (SDL_OpenURL("https://github.com/black-sliver/PopTracker/blob/master/README.md") != 0) {
                 Dlg::MsgBox("Error", SDL_GetError(), Dlg::Buttons::OK, Dlg::Icon::Error);
             }
         }
+    }};
+    _ui->onBack += {this, [this](void*) {
+        // nothing left to close: behave like other Android apps and go to the background
+#ifdef __ANDROID__
+        if (_win) {
+            SDL_Window* sdlWin = SDL_GetWindowFromID(_win->getID());
+            if (sdlWin) SDL_MinimizeWindow(sdlWin);
+        }
+#endif
+    }};
+    _ui->onAppBackground += {this, [this](void*) {
+        // Android may kill the process while in background
+        saveStateAndConfig();
     }};
     _ui->addHotkey({HOTKEY_TOGGLE_VISIBILITY, SDLK_F11, KMOD_NONE});
     _ui->addHotkey({HOTKEY_TOGGLE_VISIBILITY, SDLK_h, KMOD_LCTRL});
@@ -640,8 +686,10 @@ bool PopTracker::start()
     // set user preferences for visibility of uncleared and unreachable locations
     auto itHideCleared = _config.find("hide_cleared_locations");
     auto itHideUnreachable = _config.find("hide_unreachable_locations");
-    if (itHideCleared != _config.end() && itHideCleared.value().is_boolean())
+    if (itHideCleared != _config.end() && itHideCleared.value().is_boolean()) {
         _win->setHideClearedLocations(itHideCleared.value().get<bool>());
+        _win->setHideLocationsMenuState(itHideCleared.value().get<bool>());
+    }
     if (itHideUnreachable != _config.end() && itHideUnreachable.value().is_boolean())
         _win->setHideUnreachableLocations(itHideUnreachable.value().get<bool>());
 
@@ -651,7 +699,28 @@ bool PopTracker::start()
 
     _win->onMenuPressed += { this, [this](void*, const std::string& item, int index) {
         if (item == Ui::TrackerWindow::MENU_BROADCAST) {
-            showBroadcast();
+            if (!Ui::Touch::singleWindow())
+                showBroadcast();
+        }
+        if (item == Ui::TrackerWindow::MENU_TOGGLE_VISIBILITY) {
+            toggleLocationVisibility();
+        }
+        if (item == Ui::TrackerWindow::MENU_GET_PACKS) {
+            showPackBrowser();
+        }
+        if (item == Ui::TrackerWindow::MENU_IMPORT_PACK) {
+            importPackFile();
+        }
+        if (item == Ui::TrackerWindow::MENU_UI_LARGER) {
+            changeUiScale(1.15f);
+        }
+        if (item == Ui::TrackerWindow::MENU_UI_SMALLER) {
+            changeUiScale(1.0f / 1.15f);
+        }
+        if (item == Ui::TrackerWindow::MENU_HELP) {
+            if (SDL_OpenURL("https://github.com/black-sliver/PopTracker/blob/master/README.md") != 0) {
+                Dlg::MsgBox("Error", SDL_GetError(), Dlg::Buttons::OK, Dlg::Icon::Error);
+            }
         }
         if (item == Ui::TrackerWindow::MENU_ALWAYS_ON_TOP) {
             toggleAlwaysOnTop();
@@ -659,6 +728,11 @@ bool PopTracker::start()
         if (item == Ui::TrackerWindow::MENU_PACK_SETTINGS)
         {
             if (!_tracker) return;
+            if (Ui::Touch::enabled()) {
+                // settings as an overlay inside the main window
+                _win->showPackSettings(_tracker);
+                return;
+            }
 #ifndef __EMSCRIPTEN__ // no multi-window support (yet)
             if (_settings) {
                 _settings->Raise();
@@ -786,9 +860,14 @@ bool PopTracker::start()
                 _exportFile = filename; // this is local encoding for fopen
                 _exportUID = _pack->getUID();
                 _exportDir = _exportFile.parent_path();
+                if (!Dlg::SaveFileDone(filename, true)) {
+                    Dlg::MsgBox("PopTracker", "Error saving state!",
+                            Dlg::Buttons::OK, Dlg::Icon::Error);
+                }
             }
             else
             {
+                Dlg::SaveFileDone(filename, false);
                 Dlg::MsgBox("PopTracker", "Error saving state!",
                         Dlg::Buttons::OK, Dlg::Icon::Error);
             }
@@ -805,6 +884,10 @@ bool PopTracker::start()
             }
             loadState(filename);
         }
+    }};
+
+    _win->onInstallPack += {this, [this](void*, const std::string& uid, const std::string& name) {
+        installPackFromRepository(uid, name);
     }};
 
     _win->onPackSelected += {this, [this](void*, const fs::path& pack, const std::string& variant) {
@@ -949,6 +1032,8 @@ bool PopTracker::start()
     _packManager->onUpdateComplete += {this, [this](void*, const std::string& url, const fs::path& file, const std::string& uid) {
         (void)url;
         _win->hideProgress();
+        _win->hidePackBrowser();
+        _win->hideOpen();
         std::string variant = _pack ? _pack->getVariant() : "";
         if (_pack && _pack->getUID() == uid) {
             // FIXME: probably should capture which pack started the update
@@ -1033,29 +1118,23 @@ bool PopTracker::frame()
     }
 #endif
     _frames++;
+#ifdef __ANDROID__
+    if (!_checkedOpenFile && _win) {
+        _checkedOpenFile = true;
+        // file the app was started with ("Open with PopTracker"): handle like a dropped file
+        std::string openFile;
+        if (Platform::Android::callStringMethod("takePendingOpenFile",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
+                openFile, "", "", "", false) && !openFile.empty()) {
+            _win->onDrop.emit(_win, 0, 0, Ui::DropType::FILE, openFile);
+        }
+    }
+#endif
     bool res = _ui->render();
     
     if (!res) {
         // application is going to exit
-        auto jWindow = windowToJson(_win);
-
-        // save to config
-        _config["format_version"] = 1;
-        if (_pack)
-            _config["pack"] = {
-                {"path",_pack->getPath().u8string()},
-                {"variant",_pack->getVariant()},
-                {"uid",_pack->getUID()},
-                {"version",_pack->getVersion()}
-            };
-        if (!jWindow.is_null())
-            _config["window"] = jWindow;
-        else
-            _config.erase("window");
-        _config["export_file"] = _exportFile.u8string();
-        _config["export_uid"] = _exportUID;
-        _config["export_dir"] = _exportDir.u8string();
-        saveConfig();
+        saveStateAndConfig();
     }
 
     // load new tracker AFTER rendering a frame
@@ -1644,4 +1723,124 @@ bool PopTracker::saveConfig()
             _oldConfig = _config;
     }
     return res;
+}
+
+void PopTracker::saveStateAndConfig()
+{
+    if (!_win)
+        return;
+    auto jWindow = windowToJson(_win);
+
+    // save tracker state (also done periodically and on unload)
+    if (_tracker) {
+        json extra = {
+            {"at_uri", _atUri},
+            {"at_slot", _atSlot}
+        };
+        if (!jWindow.is_null())
+            extra["window"] = jWindow;
+        StateManager::saveState(_tracker, _scriptHost, _win->getHints(), extra, true);
+        _autosaveTimer = std::chrono::steady_clock::now();
+    }
+
+    // save to config
+    _config["format_version"] = 1;
+    if (_pack)
+        _config["pack"] = {
+            {"path",_pack->getPath().u8string()},
+            {"variant",_pack->getVariant()},
+            {"uid",_pack->getUID()},
+            {"version",_pack->getVersion()}
+        };
+    if (!jWindow.is_null() && !Ui::Touch::singleWindow())
+        _config["window"] = jWindow;
+    else
+        _config.erase("window");
+    _config["export_file"] = _exportFile.u8string();
+    _config["export_uid"] = _exportUID;
+    _config["export_dir"] = _exportDir.u8string();
+    saveConfig();
+}
+
+void PopTracker::toggleLocationVisibility()
+{
+    // until packs provide a default, we just toggle between "unset" and "hidden"
+    auto it = _config.find("hide_cleared_locations");
+    if (it == _config.end() || !it.value().is_boolean() || it.value() == false) {
+        _config["hide_cleared_locations"] = true;
+        _config["hide_unreachable_locations"] = true;
+        if (_win) _win->setHideClearedLocations(true);
+        if (_win) _win->setHideUnreachableLocations(true);
+        if (_win) _win->setHideLocationsMenuState(true);
+        if (_broadcast) _broadcast->setHideClearedLocations(true);
+        if (_broadcast) _broadcast->setHideUnreachableLocations(true);
+    } else {
+        _config["hide_cleared_locations"] = json::value_t::null;
+        _config["hide_unreachable_locations"] = json::value_t::null;
+        if (_win) _win->unsetHideClearedLocations();
+        if (_win) _win->unsetHideUnreachableLocations();
+        if (_win) _win->setHideLocationsMenuState(false);
+        if (_broadcast) _broadcast->unsetHideClearedLocations();
+        if (_broadcast) _broadcast->unsetHideUnreachableLocations();
+    }
+}
+
+void PopTracker::showPackBrowser()
+{
+    if (!_win)
+        return;
+    _win->showPackBrowser();
+    _packManager->getAvailablePacks([this](const json& packs) {
+        if (!_win)
+            return;
+        if (!packs.is_object() || packs.empty()) {
+            _win->setPackBrowserError("Could not load the pack list.\n"
+                    "Check your internet connection and try again.");
+            return;
+        }
+        std::set<std::string> installed;
+        for (const auto& info: Pack::ListAvailable())
+            installed.insert(info.uid);
+        _win->setPackBrowserPacks(packs, installed);
+    });
+}
+
+void PopTracker::installPackFromRepository(const std::string& uid, const std::string& name)
+{
+    std::string msg = "Download and install " + (name.empty() ? uid : name) + "?";
+    if (Dlg::MsgBox("PopTracker", msg, Dlg::Buttons::YesNo, Dlg::Icon::Question) != Dlg::Result::Yes)
+        return;
+    _win->showProgress("Downloading ...", 0, 0);
+    // onUpdateProgress, onUpdateFailed and onUpdateComplete (connected in start) handle the rest
+    _packManager->checkForUpdate(uid, "", "",
+        [this](const std::string& uid, const std::string& version, const std::string& url, const std::string& sha256) {
+            const auto& installDir = getPackInstallDir();
+            fs::create_directories(installDir);
+            _packManager->downloadUpdate(url, installDir, uid, version, sha256);
+        },
+        [this](const std::string& uid) {
+            _win->hideProgress();
+            Dlg::MsgBox("PopTracker", "No download found for " + uid + ".",
+                    Dlg::Buttons::OK, Dlg::Icon::Error);
+        });
+}
+
+void PopTracker::importPackFile()
+{
+    fs::path filename;
+    if (!Dlg::OpenFile("Import pack", "", {{"Pack (.zip)", {"*.zip"}}}, filename))
+        return;
+    // same as dropping the file on the window: asks to install, copies it to the pack folder and loads it
+    _win->onDrop.emit(_win, 0, 0, Ui::DropType::FILE, filename.u8string());
+}
+
+void PopTracker::changeUiScale(float factor)
+{
+    if (!_win || !Ui::Touch::enabled())
+        return;
+    float userFactor = _config["ui_scale_factor"].is_number() ? _config["ui_scale_factor"].get<float>() : 1.0f;
+    userFactor = std::max(0.5f, std::min(3.0f, userFactor * factor));
+    _config["ui_scale_factor"] = std::round(userFactor * 100.0f) / 100.0f;
+    _win->setUiScale(_autoUiScale * userFactor);
+    saveConfig();
 }

@@ -75,6 +75,14 @@ private:
     void loadState(const fs::path& filename);
     void showBroadcast();
     void toggleAlwaysOnTop();
+    void toggleLocationVisibility();
+    void installPackFromRepository(const std::string& uid, const std::string& name);
+    void showPackBrowser();
+    void importPackFile();
+    void changeUiScale(float factor);
+    void saveStateAndConfig();
+    float _autoUiScale = 1.0f; ///< UI scale from display density (touch mode)
+    bool _checkedOpenFile = false; ///< Android: checked for a file passed via "Open with"
 
     fs::path getPackInstallDir() const;
 

@@ -1,0 +1,59 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: sdkmanager "ndk;${NDK_VERSION}" "cmake;3.22.1"
+
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          path: android/deps
+          key: android-deps-${{ hashFiles('android/fetch-deps.sh', 'android/build-openssl.sh') }}
+
+      - name: Fetch SDL2, SDL2_image, SDL2_ttf
+        run: android/fetch-deps.sh
+
+      - name: Build OpenSSL
+        run: ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" android/build-openssl.sh
+
+      - name: Set up signing key (optional secrets)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/poptracker.jks"
+          echo "POPTRACKER_KEYSTORE=$RUNNER_TEMP/poptracker.jks" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        working-directory: android
+        env:
+          POPTRACKER_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          POPTRACKER_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          POPTRACKER_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: poptracker-android
+          path: android/app/build/outputs/apk/release/*.apk

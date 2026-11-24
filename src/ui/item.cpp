@@ -302,8 +302,9 @@ void Item::render(Renderer renderer, int offX, int offY)
         }, Label::HAlign::RIGHT);
         // combine
         SDL_Surface* surf = nullptr;
+        const int ts = Touch::textScale(); // shadow/light offsets in rasterized pixels
         if (tsurf && lsurf && ssurf) {
-            surf = SDL_CreateRGBSurfaceWithFormat(0, tsurf->w+2, tsurf->h+2, tsurf->format->BitsPerPixel, tsurf->format->format);
+            surf = SDL_CreateRGBSurfaceWithFormat(0, tsurf->w+2*ts, tsurf->h+2*ts, tsurf->format->BitsPerPixel, tsurf->format->format);
             if (surf) {
                 SDL_Rect d = { 0, 0, tsurf->w, tsurf->h };
                 if (_overlayBackgroundColor.a)
@@ -313,13 +314,13 @@ void Item::render(Renderer renderer, int offX, int offY)
                     ));
                 SDL_BlitSurface(lsurf, NULL, surf, &d);
                 SDL_SetSurfaceAlphaMod(lsurf, 128);
-                d.x=1; d.y=0;
+                d.x=ts; d.y=0;
                 SDL_BlitSurface(lsurf, NULL, surf, &d);
-                d.x=0; d.y=1;
+                d.x=0; d.y=ts;
                 SDL_BlitSurface(lsurf, NULL, surf, &d);
-                d.x=2; d.y=2;
+                d.x=2*ts; d.y=2*ts;
                 SDL_BlitSurface(ssurf, NULL, surf, &d);
-                d.x=1; d.y=1;
+                d.x=ts; d.y=ts;
                 SDL_BlitSurface(tsurf, NULL, surf, &d);
             }
         }
@@ -328,6 +329,8 @@ void Item::render(Renderer renderer, int offX, int offY)
         if (lsurf) SDL_FreeSurface(lsurf);
         if (surf) {
             _overlayTex = SDL_CreateTextureFromSurface(renderer, surf);
+            if (_overlayTex && ts > 1)
+                SDL_SetTextureScaleMode(_overlayTex, SDL_ScaleModeLinear);
             SDL_FreeSurface(surf);
         } else {
             printf("Text render error: %s\n", TTF_GetError());
@@ -336,6 +339,8 @@ void Item::render(Renderer renderer, int offX, int offY)
     if (_overlayTex) {
         int ow=0,oh=0; // TODO: cache instead
         if (SDL_QueryTexture(_overlayTex, NULL, NULL, &ow, &oh) == 0) {
+            ow = Touch::fromTextPixels(ow);
+            oh = Touch::fromTextPixels(oh);
             SDL_Rect dest;
             int bottom = offY+_pos.top+_size.height-1;
             if (_overlayAlign == Label::HAlign::CENTER) {

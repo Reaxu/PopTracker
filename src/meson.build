@@ -41,6 +41,8 @@ common_src += files(
     'ui/loadpackwidget.cpp',
     'ui/maptooltip.cpp',
     'ui/mapwidget.cpp',
+    'ui/mobilemenu.cpp',
+    'ui/packbrowser.cpp',
     'ui/settingswindow.cpp',
     'ui/trackerview.cpp',
     'ui/trackerwindow.cpp',
@@ -59,9 +61,11 @@ common_src += files(
     'uilib/texturemanager.cpp',
     'uilib/timer.cpp',
     'uilib/tooltip.cpp',
+    'uilib/touch.cpp',
     'uilib/ui.cpp',
     'uilib/widget.cpp',
     'uilib/window.cpp',
+    'uilib/zoomview.cpp',
     'usb2snes/usb2snes.cpp',
 )
 

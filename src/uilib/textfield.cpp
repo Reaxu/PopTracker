@@ -111,8 +111,10 @@ SDL_Texture* TextField::getTexture(Renderer renderer, const std::string& text, W
         SDL_Surface* surf = RenderText(_font, text.c_str(), col, Label::HAlign::LEFT);
         if (surf) {
             _texture.reset(SDL_CreateTextureFromSurface(renderer, surf));
-            _textureW = surf->w;
-            _textureH = surf->h;
+            if (_texture && Touch::textScale() > 1)
+                SDL_SetTextureScaleMode(_texture.get(), SDL_ScaleModeLinear);
+            _textureW = Touch::fromTextPixels(surf->w);
+            _textureH = Touch::fromTextPixels(surf->h);
             SDL_FreeSurface(surf);
         }
         if (_texture) {
@@ -196,9 +198,10 @@ void TextField::render(Renderer renderer, int offX, int offY)
         SDL_Texture* tex = getTexture(renderer, text, color);
         if (tex) {
             SDL_Rect dest = { offX+_pos.left+2, offY+_pos.top+(_size.height-_textureH)/2, _textureW, _textureH };
-            SDL_Rect src = { 0,0,_textureW,_textureH };
-            if (dest.w > _size.width-4) { dest.w = _size.width-4; src.w = dest.w; }
-            if (dest.h > _size.height) { dest.h = _size.height; src.h = dest.h; }
+            const int ts = Touch::textScale(); // texture pixels per logical pixel
+            SDL_Rect src = { 0,0,_textureW*ts,_textureH*ts };
+            if (dest.w > _size.width-4) { dest.w = _size.width-4; src.w = dest.w*ts; }
+            if (dest.h > _size.height) { dest.h = _size.height; src.h = dest.h*ts; }
             SDL_RenderCopy(renderer, tex, &src, &dest);
         }
     }

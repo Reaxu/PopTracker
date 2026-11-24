@@ -51,6 +51,7 @@ protected:
     Widget* _tooltip = nullptr;
     Widget* _keyboardFocus = nullptr;
     bool _isAlwaysOnTop = false;
+    float _uiScale = 1.0f; ///< screen pixels per logical pixel (touch mode / high density displays)
 
     void clear();
     void present();
@@ -87,6 +88,16 @@ public:
 
     void setKeyboardFocus(Widget* w);
     Widget* getKeyboardFocus() const { return _keyboardFocus; }
+
+    /// UI scale: screen pixels per logical pixel. Events and sizes are in logical pixels.
+    float getUiScale() const { return _uiScale; }
+    virtual void setUiScale(float scale);
+    /// Size of the window in screen pixels
+    Size getPixelSize() const;
+    /// Called by Ui when the OS resized the window (in screen pixels)
+    virtual void onPixelSizeChanged(Size pixelSize);
+    /// Called by Ui for the Android back button / Escape in touch mode. Return true if handled.
+    virtual bool handleBack() { return false; }
 
     bool isAccelerated() const
     {

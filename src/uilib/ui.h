@@ -7,6 +7,7 @@
 #include <string>
 #include <mutex>
 #include <list>
+#include <vector>
 #include <stdint.h>
 
 
@@ -41,6 +42,34 @@ protected:
 
     std::list<Hotkey> _hotkeys;
 
+    // touch gesture state, see touch.cpp
+    enum class TouchState {
+        NONE,       ///< no finger down
+        PENDING,    ///< one finger down, could become tap, long press or drag
+        DRAG,       ///< one finger moving: pan/scroll
+        PINCH,      ///< two fingers: zoom + pan
+        LONG_PRESS, ///< long press fired (right click), wait for release
+        IGNORE,     ///< ignore until all fingers are up
+    };
+    struct Finger {
+        SDL_FingerID id;
+        float x, y; ///< current position in logical window coordinates
+    };
+    std::vector<Finger> _fingers;
+    TouchState _touchState = TouchState::NONE;
+    Window::ID _touchWindowId = 0;
+    uint32_t _touchStartTicks = 0;
+    float _touchStartX = 0, _touchStartY = 0;
+    float _touchSentX = 0, _touchSentY = 0; ///< position up to which pan deltas were delivered
+    float _pinchDist = 0;
+    bool _backgrounded = false;
+
+    Window* touchWindow();
+    void handleFingerEvent(const SDL_Event& ev);
+    void updateTouch();
+    void touchClick(Window* win, int x, int y, int button);
+    void handleBack(Window* win);
+
 public:
     Ui(const char *name, bool fallbackRenderer, bool vsync);
     virtual ~Ui();
@@ -68,6 +97,10 @@ public:
 
     Signal<Window*> onWindowDestroyed;
     Signal<const Hotkey&> onHotkey;
+    /// Back button (Android) / Escape (touch mode) that no window handled
+    Signal<> onBack;
+    /// App moved to background (Android) - save state now, the process may get killed
+    Signal<> onAppBackground;
 };
 
 } // namespace Ui

@@ -408,4 +408,9 @@ bool Dlg::hasGUI()
     return true;
 }
 
+bool Dlg::SaveFileDone(const fs::path&, bool success)
+{
+    return success; // file was written in place
+}
+
 } // namespace Ui

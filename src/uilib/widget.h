@@ -211,6 +211,13 @@ public:
 
     virtual bool isHover(Widget* w) const { return (w == this); }
 
+    // Touch gestures. Coordinates are local to this widget's parent, like isHit(); deltas are in logical pixels.
+    // Return true if the gesture was consumed.
+    /// one-finger drag or two-finger pan; scroll lists, pan zoomed views
+    virtual bool touchPan(int x, int y, int dx, int dy) { (void)x; (void)y; (void)dx; (void)dy; return false; }
+    /// two-finger pinch; factor > 1 zooms in
+    virtual bool touchZoom(int x, int y, float factor) { (void)x; (void)y; (void)factor; return false; }
+
     void setCursor(Cursor cur) {
         bool isDisplayed = false;
         if (!_defaultCursor) {

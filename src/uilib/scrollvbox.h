@@ -2,6 +2,7 @@
 #define _UILIB_SCROLLVBOX_H
 
 #include "container.h"
+#include "cliphelper.h"
 
 namespace Ui {
 
@@ -137,6 +138,18 @@ public:
         if (_scrollY != oldScrollY) relayout();
     }
 
+    bool touchPan(int x, int y, int dx, int dy) override
+    {
+        // let nested scrollables go first, then scroll this list if it can scroll at all
+        if (Container::touchPan(x, y, dx, dy))
+            return true;
+        if (_scrollMaxY >= 0)
+            return false; // nothing to scroll
+        if (dy)
+            scrollBy(0, dy);
+        return true;
+    }
+
     virtual void scrollTo(int x, int y)
     {
         (void)x; // unused
@@ -160,16 +173,9 @@ public:
     virtual void render(Renderer renderer, int offX, int offY) override
     {
         // children
-        SDL_Rect oldClipRect;
-        SDL_RenderGetClipRect(renderer, &oldClipRect);
-        if (oldClipRect.w == 0 && oldClipRect.h == 0) {
-            // clip
-            SDL_Rect clipRect = {offX+_pos.left, offY+_pos.top, _size.width, _size.height};
-            SDL_RenderSetClipRect(renderer, &clipRect);
-            Container::render(renderer, offX, offY);
-            SDL_RenderSetClipRect(renderer, nullptr);
-        } else {
-            // already clipped
+        {
+            // clip to our bounds (intersected with any outer clip, e.g. from a ZoomView)
+            ClipGuard clip(renderer, {offX+_pos.left, offY+_pos.top, _size.width, _size.height});
             Container::render(renderer, offX, offY);
         }
         // scroll bar/position

@@ -4,6 +4,9 @@
 #include <cstdio>
 
 #include "../uilib/dlg.h"
+#ifdef __ANDROID__
+#include <SDL2/SDL.h>
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -22,7 +25,12 @@ namespace HttpUtil {
 
 void openWebsite(const std::string& url, const std::string& caller)
 {
-#if defined _WIN32 || defined WIN32
+#if defined __ANDROID__
+    // no xdg-open; SDL starts an ACTION_VIEW intent
+    if (SDL_OpenURL(url.c_str()) != 0) {
+        fprintf(stderr, "%s: SDL_OpenURL failed: %s\n", caller.c_str(), SDL_GetError());
+    }
+#elif defined _WIN32 || defined WIN32
     auto errorCode = (INT_PTR)ShellExecuteA(nullptr, "open", url.c_str(), NULL, NULL, SW_SHOWDEFAULT);
     auto success = errorCode > 32;
     if (!success) {

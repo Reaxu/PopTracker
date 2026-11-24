@@ -9,6 +9,7 @@
 #include "../uilib/imagebutton.h"
 #include "trackerview.h"
 #include "../core/tracker.h"
+#include "../uilib/zoomview.h"
 
 namespace Ui {
 
@@ -44,10 +45,21 @@ public:
     static const std::string MENU_PACK_SETTINGS;
     static const std::string MENU_TOGGLE_AUTOTRACKER;
     static const std::string MENU_CYCLE_AUTOTRACKER;
+    // touch UI menu entries
+    static const std::string MENU_TOGGLE_VISIBILITY;
+    static const std::string MENU_GET_PACKS;
+    static const std::string MENU_IMPORT_PACK;
+    static const std::string MENU_UI_LARGER;
+    static const std::string MENU_UI_SMALLER;
+    static const std::string MENU_HELP;
+
+    /// zoom of the tracker layout in touch mode (1 = fit to window)
+    void resetZoom() { if (_zoomView) _zoomView->resetZoom(); }
 
 protected:
     Container *_menu;
     TrackerView *_view;
+    ZoomView *_zoomView = nullptr; ///< parent of _view in touch mode
     bool _resizeScheduled;
     Size _resizeSize;
     bool _rendered = false;

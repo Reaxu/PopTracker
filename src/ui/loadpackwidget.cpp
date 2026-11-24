@@ -8,6 +8,7 @@
 #include "../uilib/label.h"
 #include "../uilib/imagebutton.h"
 #include "defaults.h" // DEFAULT_FONT_*
+#include "../uilib/touch.h"
 #include <SDL2/SDL.h>
 #include <fmt/format.h>
 #include <cctype>
@@ -146,7 +147,9 @@ LoadPackWidget::LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore,
         }
     }};
     
-    auto btnOpenFolder = new ImageButton(0,0,24,0, asset("closed.png"));
+    ImageButton* btnOpenFolder = nullptr;
+#ifndef __ANDROID__ // there is no file manager to open on Android, packs get imported instead
+    btnOpenFolder = new ImageButton(0,0,24,0, asset("closed.png"));
     btnOpenFolder->setGrow(0,0);
     btnOpenFolder->setMinSize({24, 0});
     _btnOpenFolder = btnOpenFolder;
@@ -156,6 +159,7 @@ LoadPackWidget::LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore,
             openPackDirectory();
         }
     }};
+#endif
     
     filter->onTextChanged += {this, [this](void*, const std::string&) {
         refreshPacks();
@@ -167,14 +171,49 @@ LoadPackWidget::LoadPackWidget(int x, int y, int w, int h, FontStore *fontStore,
     filterBar->setSpacing(4);
     filterBar->addChild(filter);
     filterBar->addChild(btnClear);
-    filterBar->addChild(btnOpenFolder);
+    if (btnOpenFolder)
+        filterBar->addChild(btnOpenFolder);
     filterBar->setHeight(filter->getHeight());
     _filterBar = filterBar;
+
+    if (Touch::enabled()) {
+        // big buttons to get packs without a file manager or drag & drop
+        const int h = Touch::rowHeight();
+        filter->setHeight(h - 4);
+        filter->setMinSize({0, h - 4});
+        btnClear->setMinSize({64, h - 4});
+        filterBar->setHeight(h);
+        auto touchBar = new HBox(0,0,0,h);
+        touchBar->setGrow(1,0);
+        touchBar->setPadding(2);
+        touchBar->setSpacing(4);
+        const std::pair<const char*, Signal<>*> buttons[] = {
+            {"Get packs", &onGetPacks},
+            {"Import .zip", &onImportPack},
+            {"Close", &onClose},
+        };
+        for (const auto& pair : buttons) {
+            auto btn = new Button(0,0,0,h-4, _font, pair.first);
+            btn->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+            btn->setGrow(1,0);
+            btn->setMinSize({btn->getMinWidth(), h-4});
+            btn->setHeight(h-4);
+            auto sig = pair.second;
+            btn->onClick += {this, [this, sig](void*, int, int, int button) {
+                if (button == MouseButton::BUTTON_LEFT)
+                    sig->emit(this);
+            }};
+            touchBar->addChild(btn);
+        }
+        _touchBar = touchBar;
+    }
     
     auto root = new VBox(0,0,0,0);
     root->setGrow(1,1);
     root->setPadding(0);
     root->setSpacing(1);
+    if (_touchBar)
+        root->addChild(_touchBar);
     root->addChild(filterBar);
     root->addChild(hbox);
     _root = root;
@@ -241,8 +280,8 @@ void LoadPackWidget::refreshPacks()
         auto lbl = new Label(0, 0, 0, 0, _font, packLabel); // TODO: button instead of label
         lbl->setGrow(1,0);
         lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
-        lbl->setMinSize({64,lbl->getAutoHeight()});
-        lbl->setSize({_size.width/2,32}); // TODO; hbox with even split instead
+        lbl->setMinSize({64,std::max(lbl->getAutoHeight(), Touch::rowHeight())});
+        lbl->setSize({_size.width/2,std::max(32, Touch::rowHeight())}); // TODO; hbox with even split instead
         lbl->setBackground(PACK_BG_DEFAULT);
         _packs->addChild(lbl);
 
@@ -271,8 +310,8 @@ void LoadPackWidget::refreshPacks()
                 auto lbl = new Label(0,0,0,0, _font, " " + variant.name); // TODO: button instead of label
                 lbl->setGrow(1,0);
                 lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);
-                lbl->setMinSize({64,lbl->getAutoHeight()});
-                lbl->setSize({_variants->getWidth(),32}); // FIXME: this should be done by vbox
+                lbl->setMinSize({64,std::max(lbl->getAutoHeight(), Touch::rowHeight())});
+                lbl->setSize({_variants->getWidth(),std::max(32, Touch::rowHeight())}); // FIXME: this should be done by vbox
                 lbl->setBackground(VARIANT_BG_DEFAULT);
                 _variants->addChild(lbl);
                 lbl->onMouseLeave += {this,[this,variant](void *s) {
@@ -311,9 +350,9 @@ void LoadPackWidget::refreshPacks()
     }
 
     if (shown == 0) {
-        const char* msg = _availablePacks.empty() ?
-            "No packs installed!\nDrag & drop packs into the window to install them." :
-            "No packs found!";
+        const char* msg = !_availablePacks.empty() ? "No packs found!" :
+            Touch::enabled() ? "No packs installed!\nTap \"Get packs\" to download some." :
+            "No packs installed!\nDrag & drop packs into the window to install them.";
         auto* lbl = new Label(0, 0, 0, 0, _font, msg);
         lbl->setGrow(1,1);
         lbl->setTextAlignment(Label::HAlign::LEFT, Label::VAlign::MIDDLE);

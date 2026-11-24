@@ -1,6 +1,8 @@
 #include "mapwidget.h"
 #include "../core/util.h" // countOf
 #include "../uilib/drawhelper.h"
+#include "../uilib/cliphelper.h"
+#include "../uilib/touch.h"
 #include <algorithm> // std::max, std::min
 
 
@@ -192,6 +194,40 @@ void MapWidget::connectSignals()
                 }
             }
         }
+        // no exact match: on touch screens, accept the nearest location within a finger's width
+        if (Touch::enabled()) {
+            constexpr int TOUCH_MARGIN = 12;
+            int bestDist = TOUCH_MARGIN + 1;
+            const std::string* best = nullptr;
+            for (auto locIt = _locations.rbegin(); locIt != _locations.rend(); ++locIt) {
+                for (const auto& pos: locIt->second.pos) {
+                    if (pos.state == -1) continue;
+                    if (pos.state == 0 && _hideClearedLocations) continue;
+                    if (pos.state == 2 && _hideUnreachableLocations) continue;
+                    int innerX, innerY, innerW, innerH, borderSize;
+                    calculateLocationScreenRect(pos, srcRect, dstRect, baseScale,
+                        innerX, innerY, innerW, innerH, borderSize);
+                    const int left = innerX - borderSize;
+                    const int top = innerY - borderSize;
+                    const int right = left + innerW + 2 * borderSize;
+                    const int bottom = top + innerH + 2 * borderSize;
+                    const int dx = x1 < left ? left - x1 : x1 >= right ? x1 - right + 1 : 0;
+                    const int dy = y1 < top ? top - y1 : y1 >= bottom ? y1 - bottom + 1 : 0;
+                    const int dist = std::max(dx, dy);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = &locIt->first;
+                    }
+                }
+            }
+            if (best) {
+                if (*best != _locationHover) {
+                    _locationHover = *best;
+                    onLocationHover.emit(this, *_locationHover, absX, absY);
+                }
+                return;
+            }
+        }
         // no match
         _locationHover.reset();
     }};
@@ -311,9 +347,8 @@ void MapWidget::render(Renderer renderer, const int offX, const int offY)
     if (!tex)
         return;
 
-    // Clipping rect is the widget area
-    const SDL_Rect clipRect = { widgetX, widgetY, widgetW, widgetH };
-    SDL_RenderSetClipRect(renderer, &clipRect);
+    // Clipping rect is the widget area (intersected with outer clip, restored at end of scope)
+    const ClipGuard clip(renderer, { widgetX, widgetY, widgetW, widgetH });
 
     SDL_Rect srcRect;
     SDL_FRect dstRect;
@@ -427,8 +462,6 @@ void MapWidget::render(Renderer renderer, const int offX, const int offY)
         }
     }
 
-    // Restore clipping
-    SDL_RenderSetClipRect(renderer, nullptr);
 }
 
 void MapWidget::calculateSrcAndDst(const int offX, const int offY, const bool clip, float& baseScale, SDL_Rect& srcRect,

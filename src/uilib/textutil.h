@@ -4,6 +4,7 @@
 // helper functions for text rendering
 
 #include "label.h"
+#include "touch.h"
 #include <string.h>
 #include <string>
 #include <vector>
@@ -124,10 +125,13 @@ static SDL_Surface* RenderText(Label::FONT font, const char* text, SDL_Color col
     return _RenderText(font, text, color, halign);
 }
 
+/// Returns size in logical pixels. Surfaces from RenderText are Touch::textScale() times larger.
 static int SizeText(Label::FONT font, const char* text, int* w, int* h)
 {
     int res;
     _RenderText(font, text, {0,0,0,0}, Label::HAlign::LEFT, 1, w, h, &res);
+    if (w) *w = Touch::fromTextPixels(*w);
+    if (h) *h = Touch::fromTextPixels(*h);
     return res;
 }
 

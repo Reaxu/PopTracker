@@ -1,5 +1,6 @@
 #include "fontstore.h"
 #include "../core/assets.h"
+#include "touch.h"
 
 
 namespace Ui {
@@ -34,10 +35,11 @@ FontStore::FONT FontStore::getFont(const char* name, int size)
 
 #ifdef _WIN32
     // on Windows, SDL_ttf uses SDL's IO functions, which expect UTF8
-    FONT font = TTF_OpenFont(asset(name).u8string().c_str(), size);
+    FONT font = TTF_OpenFont(asset(name).u8string().c_str(), size * Touch::textScale());
 #else
     // otherwise it's probably fopen, which is "native" encoding
-    FONT font = TTF_OpenFont(asset(name).c_str(), size);
+    // fonts are rasterized at textScale and drawn scaled down to stay sharp on high-density screens
+    FONT font = TTF_OpenFont(asset(name).c_str(), size * Touch::textScale());
 #endif
     if (!font) {
         fprintf(stderr, "TTF_OpenFont: %s\n", TTF_GetError());

@@ -3,6 +3,8 @@
 #include "../ui/defaults.h" // DEFAULT_FONT_*
 #include "tooltip.h"
 #include "texturemanager.h"
+#include "touch.h"
+#include <cmath>
 #include <SDL2/SDL_syswm.h>
 #include <algorithm>
 #include <string>
@@ -20,6 +22,7 @@ Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const 
     (void)config;
     
     printf("Creating renderer ...");
+    // NOTE: on Android the window always fills the activity, size and position are ignored
     _win = SDL_CreateWindow(title,
             pos.left, pos.top,
             _size.width, _size.height, SDL_WINDOW_RESIZABLE);
@@ -53,6 +56,24 @@ Window::Window(const char *title, SDL_Surface* icon, const Position& pos, const 
     }
     
     SDL_SetRenderDrawBlendMode(_ren, SDL_BLENDMODE_BLEND);
+
+    if (Touch::enabled()) {
+        float scale = Touch::requestedScale();
+        if (scale <= 0.0f) {
+            // auto: Android-style density independent pixels (160 dpi = 1.0)
+            float ddpi = 0;
+            int display = SDL_GetWindowDisplayIndex(_win);
+            if (SDL_GetDisplayDPI(display < 0 ? 0 : display, &ddpi, nullptr, nullptr) == 0 && ddpi > 0)
+                scale = ddpi / 160.0f;
+            else
+                scale = 1.0f;
+        }
+        _uiScale = std::max(0.5f, std::min(8.0f, scale));
+        SDL_RenderSetScale(_ren, _uiScale, _uiScale);
+        Size px = getPixelSize();
+        Container::setSize({(int)(px.width / _uiScale), (int)(px.height / _uiScale)});
+        printf("Ui scale: %.2f, logical size %dx%d\n", _uiScale, _size.width, _size.height);
+    }
     
     printf("Loading font ...\n");
     _fontStore = new FontStore();
@@ -161,8 +182,41 @@ void Window::setTitle(const std::string& title)
 
 void Window::resize(Size size)
 {
+    if (Touch::enabled()) {
+        // window size is controlled by the OS/user; content adapts instead (see ZoomView)
+        return;
+    }
     SDL_SetWindowSize(_win, size.width, size.height);
     setSize(size);
+}
+
+Size Window::getPixelSize() const
+{
+    int w = 0, h = 0;
+    if (_ren && SDL_GetRendererOutputSize(_ren, &w, &h) == 0 && w > 0 && h > 0)
+        return {w, h};
+    SDL_GetWindowSize(_win, &w, &h);
+    return {w, h};
+}
+
+void Window::onPixelSizeChanged(Size pixelSize)
+{
+    if (_uiScale == 1.0f) {
+        setSize(pixelSize);
+    } else {
+        setSize({(int)std::floor(pixelSize.width / _uiScale), (int)std::floor(pixelSize.height / _uiScale)});
+    }
+}
+
+void Window::setUiScale(float scale)
+{
+    scale = std::max(0.5f, std::min(8.0f, scale));
+    if (scale == _uiScale)
+        return;
+    _uiScale = scale;
+    if (_ren)
+        SDL_RenderSetScale(_ren, _uiScale, _uiScale);
+    onPixelSizeChanged(getPixelSize());
 }
 
 void Window::Raise()
@@ -202,6 +256,8 @@ void Window::setPosition(const Position& pos)
 void Window::setMinSize(Size size)
 {
     Container::setMinSize(size);
+    if (Touch::enabled())
+        return; // see resize()
     // limit min window width/height to of 5/6 of the screen min. dimension
     int w = 720;
     SDL_DisplayMode dm;

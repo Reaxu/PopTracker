@@ -1,6 +1,10 @@
 #include "poptracker.h"
+#include <SDL2/SDL.h> // on Android, this renames main to SDL_main, which SDLActivity calls
 #include <string.h>
 #include <stdio.h>
+#ifdef __ANDROID__
+#include "platform/android.h"
+#endif
 
 
 #if defined WIN32 || defined _WIN32
@@ -36,6 +40,9 @@ static int getche() {
 
 int main(int argc, char** argv)
 {
+#ifdef __ANDROID__
+    Platform::androidInit(); // paths, logging, SDL hints
+#endif
     const char* appName = argc>0 && argv[0] ? argv[0] : PopTracker::APPNAME;
     bool openConsole = false;
     bool noConsole = false;

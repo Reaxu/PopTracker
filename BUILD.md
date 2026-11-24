@@ -122,6 +122,13 @@ Dependencies to build the bundle: install git and `brew install automake libtool
 
 To run tests, `brew install googletest` and then `meson test -C build`.
 
+
+## Build for Android
+
+See [android/README.md](android/README.md). In short: `android/fetch-deps.sh`, `android/build-openssl.sh`,
+then `./gradlew assembleDebug` in `android/` (or open `android/` in Android Studio).
+The same touch UI can be tried on desktop with `POPTRACKER_TOUCH_UI=1`.
+
 ## Debug Builds
 
 For debugging, the recommended config is  

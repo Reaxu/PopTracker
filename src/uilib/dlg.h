@@ -40,6 +40,10 @@ public:
     static Result MsgBox(const std::string& title, const std::string& message, Buttons btns=Buttons::OK, Icon icon=Icon::Info, Result dflt=Result::OK);
     static bool OpenFile(const std::string& title, const fs::path& dflt, const std::list<FileType>& types, fs::path& out, bool multi=false);
     static bool SaveFile(const std::string& title, const fs::path& dflt, const std::list<FileType>& types, fs::path& out);
+    /// Call after writing (or failing to write) the file returned by SaveFile.
+    /// On Android, SaveFile returns a temporary file that gets copied to the document the user picked here.
+    /// Returns false if that failed. No-op on other platforms.
+    static bool SaveFileDone(const fs::path& file, bool success);
 
     /// Returns true if running a dialog won't read from stdin
     static bool hasGUI();

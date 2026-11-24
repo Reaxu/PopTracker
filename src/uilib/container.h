@@ -116,6 +116,38 @@ public:
         return false;
     }
 
+    bool touchPan(int x, int y, int dx, int dy) override {
+        if (!_mouseInteraction || !_visible)
+            return false;
+        x -= _pos.left;
+        y -= _pos.top;
+        for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
+            Widget* child = *childIt;
+            if (child->getVisible() && child->isHit(x, y)) {
+                if (child->touchPan(x, y, dx, dy))
+                    return true;
+                break; // only the top-most hit child gets the gesture
+            }
+        }
+        return false;
+    }
+
+    bool touchZoom(int x, int y, float factor) override {
+        if (!_mouseInteraction || !_visible)
+            return false;
+        x -= _pos.left;
+        y -= _pos.top;
+        for (auto childIt = _children.rbegin(); childIt != _children.rend(); ++childIt) {
+            Widget* child = *childIt;
+            if (child->getVisible() && child->isHit(x, y)) {
+                if (child->touchZoom(x, y, factor))
+                    return true;
+                break;
+            }
+        }
+        return false;
+    }
+
     const Widget* getHit(int x, int y) const override {
         for (const auto& w: _children) {
             if (w->getHit(x - w->getLeft(), y - w->getTop())) return w;

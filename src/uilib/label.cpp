@@ -32,7 +32,9 @@ void Label::render(Renderer renderer, int offX, int offY)
         SDL_Surface* surf = RenderText(_font, _text.c_str(), color, _halign);
         if (surf) {
             _tex = SDL_CreateTextureFromSurface(renderer, surf);
-            _autoSize = {surf->w, surf->h};
+            if (_tex && Touch::textScale() > 1)
+                SDL_SetTextureScaleMode(_tex, SDL_ScaleModeLinear);
+            _autoSize = {Touch::fromTextPixels(surf->w), Touch::fromTextPixels(surf->h)};
             SDL_FreeSurface(surf);
         } else {
             printf("Text render error: %s\n", TTF_GetError());
@@ -62,8 +64,9 @@ void Label::render(Renderer renderer, int offX, int offY)
     else
         destY = y+_size.height-texH;
     
+    const int ts = Touch::textScale(); // texture pixels per logical pixel
     SDL_Rect dest { destX, destY, texW, texH };
-    SDL_Rect src { 0,0,texW,texH };
+    SDL_Rect src { 0,0,texW*ts,texH*ts };
     SDL_Rect *psrc = nullptr;
     if (_size.width>0 && dest.w>_size.width) {
         if (_halign == HAlign::RIGHT)
@@ -71,7 +74,7 @@ void Label::render(Renderer renderer, int offX, int offY)
         else if (_halign == HAlign::CENTER)
             dest.x += (dest.w - _size.width)/2;
         dest.w = _size.width;
-        src.w = _size.width;
+        src.w = _size.width*ts;
         psrc = &src;
     }
     if (_size.height>0 && dest.h>_size.height) {
@@ -80,7 +83,7 @@ void Label::render(Renderer renderer, int offX, int offY)
         else if (_halign == HAlign::CENTER)
             dest.y += (dest.h - _size.height)/2;
         dest.h = _size.height;
-        src.w = _size.width;
+        src.h = _size.height*ts;
         psrc = &src;
     }
     SDL_RenderCopy(renderer, _tex, psrc, &dest);

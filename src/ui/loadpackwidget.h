@@ -32,6 +32,10 @@ public:
     void releaseFilterFocus();
     
     Signal<const fs::path&, const std::string&> onPackSelected;
+    // touch mode buttons
+    Signal<> onGetPacks;
+    Signal<> onImportPack;
+    Signal<> onClose;
 
     virtual void setSize(Size size) override; // TODO: have more intelligent hbox instead
     
@@ -46,6 +50,7 @@ protected:
     TextField *_filter = nullptr;
     Button *_btnClearFilter = nullptr;
     ImageButton *_btnOpenFolder = nullptr;
+    HBox *_touchBar = nullptr;
     
     ScrollVBox *_packs;
     VBox *_variants;
