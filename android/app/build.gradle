@@ -30,7 +30,7 @@ android {
             cmake {
                 arguments '-DANDROID_STL=c++_shared',
                           "-DPOPTRACKER_DEPS_DIR=${depsDir.absolutePath}"
-                abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+                abiFilters 'arm64-v8a', 'x86_64' // 64-bit only: PopTracker requires a 64-bit time_t
             }
         }
     }
