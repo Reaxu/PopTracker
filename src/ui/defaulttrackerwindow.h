@@ -43,6 +43,10 @@ public:
     /// deferred=true when called from inside the overlay's own event handlers
     void hidePackSettings(bool deferred = false);
     bool isPackSettingsVisible() const { return _settingsOverlay && _settingsOverlay->getVisible(); }
+    /// touch mode: show items and maps as separate pages (switch in the tool bar)
+    void setSplitMode(bool split);
+    bool getSplitMode() const { return _splitMode; }
+    void setSplitPage(int page);
     /// state for the menu's "hide cleared locations" entry
     void setHideLocationsMenuState(bool hidden) { _menuLocationsHidden = hidden; }
 
@@ -85,6 +89,12 @@ protected:
     bool _menuLocationsHidden = false;
     std::vector<Widget*> _pendingDelete;
     Tracker *_tracker = nullptr;
+
+    HBox *_splitBox = nullptr;
+    std::vector<Button*> _splitButtons;
+    bool _splitMode = true;
+    int _splitPage = 0;
+    void updateSplitButtons();
 
     void layoutOverlays(Size size);
     void updateFitButton();

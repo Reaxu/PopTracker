@@ -101,13 +101,20 @@ DefaultTrackerWindow::DefaultTrackerWindow(const char* title, SDL_Surface* icon,
     hbox->addChild(_lblTooltip);
 
     if (touch) {
-        // "Fit" shows up while the layout is zoomed in, tap to see everything again
-        _btnFit = new Button(0,0,0,btn, _font, " Fit ");
+        // "Items" / "Maps" page switch, filled in by updateSplitButtons()
+        _splitBox = new HBox(0,0,0,btn);
+        _splitBox->setPadding(0);
+        _splitBox->setSpacing(2);
+        _splitBox->setGrow(0,0);
+        hbox->addChild(_splitBox);
+
+        // floating "Fit" button, shows up while the layout is zoomed in (see layoutOverlays)
+        _btnFit = new Button(0,0,0,btn, _font, "  Fit to screen  ");
         _btnFit->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
-        _btnFit->setMinSize({std::max(_btnFit->getMinWidth(), 48), btn});
-        _btnFit->setSize({std::max(_btnFit->getMinWidth(), 48), btn});
+        _btnFit->setBackground({0x30, 0x30, 0x30, 0xe0});
+        _btnFit->setSize({_btnFit->getAutoWidth() + 8, btn});
         _btnFit->setVisible(false);
-        hbox->addChild(_btnFit);
+        addChild(_btnFit);
         _btnFit->onClick += { this, [this](void*, int, int, int) {
             resetZoom();
         }};
@@ -273,6 +280,13 @@ void DefaultTrackerWindow::setTracker(Tracker* tracker, const std::string& layou
         }};
     }
     updateFitButton();
+    if (_view && Touch::enabled()) {
+        _view->onSplitChanged += {this, [this](void*) {
+            updateSplitButtons();
+        }};
+        _view->setSplitMode(_splitMode, _splitPage);
+    }
+    updateSplitButtons();
     if (tracker) {
         hideMessage();
         tracker->onLayoutChanged -= this;
@@ -551,11 +565,18 @@ void DefaultTrackerWindow::updateFitButton()
     const bool zoomed = _zoomView && _zoomView->isZoomed();
     if (_btnFit->getVisible() != zoomed)
         _btnFit->setVisible(zoomed);
+    if (zoomed) {
+        raiseChild(_btnFit);
+        layoutOverlays(_size);
+    }
 }
 
 void DefaultTrackerWindow::layoutOverlays(Size size)
 {
     const int bar = Touch::barHeight();
+    if (_btnFit) {
+        _btnFit->setPosition({size.width - _btnFit->getWidth() - 12, size.height - _btnFit->getHeight() - 12});
+    }
     if (_mobileMenu) {
         _mobileMenu->setPosition({0, 0});
         _mobileMenu->setPanelTop(bar);
@@ -595,6 +616,9 @@ void DefaultTrackerWindow::showMenu()
         if (_tracker->hasLayout("settings_popup"))
             entries.push_back({MENU_PACK_SETTINGS, 0, "Pack settings"});
         entries.push_back({MENU_RELOAD, 0, "Reload pack"});
+        if (!_splitMode || (_view && _view->getSplitPageCount() > 1))
+            entries.push_back({MENU_TOGGLE_SPLIT, 0,
+                    _splitMode ? "Show items and maps together" : "Show items and maps separately"});
         entries.push_back({MENU_TOGGLE_VISIBILITY, 0,
                 _menuLocationsHidden ? "Show cleared locations" : "Hide cleared locations"});
         entries.push_back({MENU_SAVE_STATE, 0, "Export state..."});
@@ -624,10 +648,14 @@ void DefaultTrackerWindow::showMenu()
     entries.push_back({MENU_HELP, 0, "Help"});
     _mobileMenu->onSelected -= this;
     _mobileMenu->onSelected += {this, [this](void*, const std::string& id, int index) {
-        if (id == "reset-zoom")
+        if (id == "reset-zoom") {
             resetZoom();
-        else
+        } else if (id == MENU_TOGGLE_SPLIT) {
+            setSplitMode(!_splitMode);
+            onMenuPressed.emit(this, id, _splitMode ? 1 : 0); // to save the setting
+        } else {
             onMenuPressed.emit(this, id, index);
+        }
     }};
     _mobileMenu->setEntries(entries);
     _mobileMenu->setVisible(true);
@@ -747,6 +775,67 @@ bool DefaultTrackerWindow::handleBack()
         return true;
     }
     return false;
+}
+
+static void styleSplitButton(Button* btn, bool active)
+{
+    // selected page: accent color, like a segmented control
+    btn->setBackground(active ? Widget::Color{0x2a, 0x62, 0xc0} : Widget::Color{0x30, 0x30, 0x30});
+    btn->setTextColor(active ? Widget::Color{0xff, 0xff, 0xff} : Widget::Color{0xb0, 0xb0, 0xb0});
+}
+
+void DefaultTrackerWindow::setSplitMode(bool split)
+{
+    _splitMode = split;
+    if (_view && Touch::enabled())
+        _view->setSplitMode(_splitMode, _splitPage);
+    resetZoom();
+    updateSplitButtons();
+}
+
+void DefaultTrackerWindow::setSplitPage(int page)
+{
+    _splitPage = page;
+    if (_view)
+        _view->setSplitPage(page);
+    resetZoom();
+    for (size_t i = 0; i < _splitButtons.size(); i++)
+        styleSplitButton(_splitButtons[i], (int)i == page);
+}
+
+void DefaultTrackerWindow::updateSplitButtons()
+{
+    if (!_splitBox)
+        return;
+    // NOTE: never called from a split button's own click handler, since it deletes the buttons
+    _splitBox->clearChildren();
+    _splitButtons.clear();
+    const int h = _splitBox->getHeight();
+    int w = 0;
+    if (_view && _splitMode && _view->getSplitPageCount() > 1) {
+        const auto& names = _view->getSplitPageNames();
+        _splitPage = _view->getSplitPage();
+        for (size_t i = 0; i < names.size(); i++) {
+            auto btn = new Button(0, 0, 0, h, _font, " " + names[i] + " ");
+            btn->setTextAlignment(Label::HAlign::CENTER, Label::VAlign::MIDDLE);
+            const int bw = std::max(btn->getAutoWidth() + 8, 56);
+            btn->setMinSize({bw, h});
+            btn->setSize({bw, h});
+            styleSplitButton(btn, (int)i == _splitPage);
+            const int page = (int)i;
+            btn->onClick += {this, [this, page](void*, int, int, int button) {
+                if (button == BUTTON_LEFT)
+                    setSplitPage(page);
+            }};
+            _splitBox->addChild(btn);
+            _splitButtons.push_back(btn);
+            w += bw + (i ? 2 : 0);
+        }
+    }
+    _splitBox->setMinSize({w, h});
+    _splitBox->setSize({w, h});
+    if (auto menu = dynamic_cast<HBox*>(_menu))
+        menu->relayout();
 }
 
 } // namespace

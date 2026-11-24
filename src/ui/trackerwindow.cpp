@@ -21,6 +21,7 @@ const std::string TrackerWindow::MENU_IMPORT_PACK = "import-pack";
 const std::string TrackerWindow::MENU_UI_LARGER = "ui-larger";
 const std::string TrackerWindow::MENU_UI_SMALLER = "ui-smaller";
 const std::string TrackerWindow::MENU_HELP = "help";
+const std::string TrackerWindow::MENU_TOGGLE_SPLIT = "toggle-split";
 
 TrackerWindow::TrackerWindow(const char* title, SDL_Surface* icon, const Position& pos, const Size& size, const WindowConfig& config)
     : Window(title, icon, pos, size, config)
@@ -71,6 +72,7 @@ void TrackerWindow::setTracker(Tracker* tracker, const std::string& layout)
             // fit layout to the screen, with pinch-zoom
             _zoomView = new ZoomView(left, top, std::max(1, _size.width - left), std::max(1, _size.height - top));
             _zoomView->setBackground(_backgroundColor.a ? _backgroundColor : Color{0, 0, 0});
+            _zoomView->setMaxFit(2.0f); // small layouts get bigger on big screens, easier to tap
             _zoomView->setChild(_view);
             addChild(_zoomView);
             if (_menu) raiseChild(_menu); // keep tool bar and its overlays on top

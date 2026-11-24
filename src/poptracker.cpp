@@ -258,6 +258,9 @@ PopTracker::PopTracker([[maybe_unused]] int argc, [[maybe_unused]] char** argv, 
         _config["touch_ui"] = nullptr;
     if (!_config["ui_scale_factor"].is_number())
         _config["ui_scale_factor"] = 1.0;
+    // touch UI: items and maps on separate pages
+    if (!_config["touch_split"].is_boolean())
+        _config["touch_split"] = true;
 
     if (!cli) {
         // enable logging
@@ -596,15 +599,15 @@ bool PopTracker::start()
             }
         }
     }};
+#ifdef __ANDROID__
     _ui->onBack += {this, [this](void*) {
         // nothing left to close: behave like other Android apps and go to the background
-#ifdef __ANDROID__
         if (_win) {
             SDL_Window* sdlWin = SDL_GetWindowFromID(_win->getID());
             if (sdlWin) SDL_MinimizeWindow(sdlWin);
         }
-#endif
     }};
+#endif
     _ui->onAppBackground += {this, [this](void*) {
         // Android may kill the process while in background
         saveStateAndConfig();
@@ -716,6 +719,10 @@ bool PopTracker::start()
         }
         if (item == Ui::TrackerWindow::MENU_UI_SMALLER) {
             changeUiScale(1.0f / 1.15f);
+        }
+        if (item == Ui::TrackerWindow::MENU_TOGGLE_SPLIT) {
+            _config["touch_split"] = index != 0;
+            saveConfig();
         }
         if (item == Ui::TrackerWindow::MENU_HELP) {
             if (SDL_OpenURL("https://github.com/black-sliver/PopTracker/blob/master/README.md") != 0) {
@@ -885,6 +892,8 @@ bool PopTracker::start()
             loadState(filename);
         }
     }};
+
+    _win->setSplitMode(_config["touch_split"].get<bool>());
 
     _win->onInstallPack += {this, [this](void*, const std::string& uid, const std::string& name) {
         installPackFromRepository(uid, name);

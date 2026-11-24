@@ -12,6 +12,7 @@
 #include "../core/tracker.h"
 #include <list>
 #include <map>
+#include <vector>
 
 namespace Ui {
 
@@ -31,6 +32,18 @@ public:
     Tracker* getTracker();
 
     void setHideClearedLocations(bool hide);
+
+    /// Split mode (touch UI): show the item part and the map part of the layout as separate pages
+    /// that each fill the screen. Only applies if the layout has both parts side by side.
+    void setSplitMode(bool enabled, int page = 0);
+    bool getSplitMode() const { return _splitEnabled; }
+    void setSplitPage(int page);
+    int getSplitPage() const { return _splitPage; }
+    /// number of pages the current layout splits into (0 = not split)
+    int getSplitPageCount() const { return (int)_splitPageNames.size(); }
+    const std::vector<std::string>& getSplitPageNames() const { return _splitPageNames; }
+    /// emitted when the pages changed after a (re)layout
+    Signal<> onSplitChanged;
     void setHideUnreachableLocations(bool hide);
 
     Signal<const std::string&> onItemHover;
@@ -70,6 +83,19 @@ protected:
     std::list<Tabs*> _tabs;
     std::list<std::string> _activeTabs;
     std::list< std::pair<std::string,std::string> > _missedHints;
+
+    // split mode, see setSplitMode
+    bool _splitEnabled = false;
+    int _splitPage = 0;
+    int _builtSplitPage = -1;
+    std::vector<std::string> _splitPageNames;
+    std::map<int, std::list<std::string>> _splitActiveTabs; ///< active tab names per page
+    std::list<std::string> _splitTabHints; ///< ActivateTab hints, re-applied when a page gets built
+
+    /// the layout tree to build: whole layout, or one page in split mode
+    LayoutNode getRootNode();
+    const LayoutNode* resolveLayoutRef(const LayoutNode* node, int depth = 0);
+    bool containsMap(const LayoutNode& node, int depth = 0);
 
     bool _hideClearedLocations = false;
     bool _hideUnreachableLocations = false;

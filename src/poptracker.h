@@ -82,7 +82,9 @@ private:
     void changeUiScale(float factor);
     void saveStateAndConfig();
     float _autoUiScale = 1.0f; ///< UI scale from display density (touch mode)
-    bool _checkedOpenFile = false; ///< Android: checked for a file passed via "Open with"
+#ifdef __ANDROID__
+    bool _checkedOpenFile = false; ///< checked for a file passed via "Open with"
+#endif
 
     fs::path getPackInstallDir() const;
 

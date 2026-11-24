@@ -52,6 +52,7 @@ public:
     static const std::string MENU_UI_LARGER;
     static const std::string MENU_UI_SMALLER;
     static const std::string MENU_HELP;
+    static const std::string MENU_TOGGLE_SPLIT;
 
     /// zoom of the tracker layout in touch mode (1 = fit to window)
     void resetZoom() { if (_zoomView) _zoomView->resetZoom(); }

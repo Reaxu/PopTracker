@@ -11,6 +11,16 @@ LayoutNode LayoutNode::FromJSONString(const std::string& j, std::unordered_map<s
     return FromJSON(tmp, classes);
 }
 
+LayoutNode LayoutNode::MakeArray(std::list<LayoutNode> content, bool vertical)
+{
+    LayoutNode node = FromJSON(nlohmann::json{
+        {"type", "array"},
+        {"orientation", vertical ? "vertical" : "horizontal"},
+    });
+    node._content = std::move(content);
+    return node;
+}
+
 LayoutNode LayoutNode::FromJSON(nlohmann::json&& j)
 {
     auto tmp = j;

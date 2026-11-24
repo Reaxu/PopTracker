@@ -339,15 +339,132 @@ TrackerView::~TrackerView()
 
 void TrackerView::relayout()
 {
-    const LayoutNode node = _tracker->getLayout(_layoutRoot);
+    const auto oldPageNames = _splitPageNames;
+    const LayoutNode node = getRootNode();
     _relayoutRequired = false;
     _tracker->onUiHint -= this; // stop recording hints
     if (node.getType() != "") addLayoutNode(this, node);
+    if (_splitEnabled) {
+        // tab switches requested (e.g. by auto tracking) while this page was not shown
+        for (const auto& name: _splitTabHints) {
+            for (auto tab: _tabs)
+                tab->setActiveTab(name);
+        }
+        _splitTabHints.clear();
+        _builtSplitPage = _splitPageNames.empty() ? -1 : _splitPage;
+        _tracker->onUiHint += { this, [this](void*, const std::string& name, const std::string& value) {
+            if (name == "ActivateTab") {
+                _splitTabHints.remove(value);
+                for (const auto tab: _tabs) {
+                    if (tab->getActiveTabName() == value)
+                        return; // tab is on the page that's shown and got activated already
+                }
+                // remember for when the other page gets shown
+                _splitTabHints.push_back(value);
+                if (_splitTabHints.size() > 32)
+                    _splitTabHints.pop_front();
+            } else if (name == "reset") {
+                _splitTabHints.clear();
+                _splitActiveTabs.clear();
+            }
+        }};
+    }
     for (const auto& pair : _missedHints) { // replay missed layout hints
         _tracker->onUiHint.emit(_tracker, pair.first, pair.second);
     }
     _missedHints.clear();
     updateLocations();
+    if (_splitPageNames != oldPageNames)
+        onSplitChanged.emit(this);
+}
+
+void TrackerView::setSplitMode(bool enabled, int page)
+{
+    if (enabled == _splitEnabled && page == _splitPage)
+        return;
+    _splitEnabled = enabled;
+    _splitPage = std::max(0, page);
+    updateLayout("");
+}
+
+void TrackerView::setSplitPage(int page)
+{
+    if (page == _splitPage || page < 0)
+        return;
+    _splitPage = page;
+    if (_splitEnabled && !_splitPageNames.empty())
+        updateLayout("");
+}
+
+const LayoutNode* TrackerView::resolveLayoutRef(const LayoutNode* node, int depth)
+{
+    while (node && node->getType() == "layout" && depth < 16) {
+        if (!_tracker->hasLayout(node->getKey()))
+            return nullptr;
+        _layoutRefs.push_back(node->getKey()); // rebuild when it changes
+        node = &_tracker->getLayout(node->getKey());
+        depth++;
+    }
+    return node;
+}
+
+bool TrackerView::containsMap(const LayoutNode& node, int depth)
+{
+    if (depth > 32)
+        return false;
+    const LayoutNode* n = resolveLayoutRef(&node);
+    if (!n)
+        return false;
+    if (n->getType() == "map")
+        return true;
+    for (const auto& child: n->getChildren()) {
+        if (containsMap(child, depth + 1))
+            return true;
+    }
+    return false;
+}
+
+LayoutNode TrackerView::getRootNode()
+{
+    const LayoutNode& root = _tracker->getLayout(_layoutRoot);
+    _splitPageNames.clear();
+    if (!_splitEnabled)
+        return root;
+
+    // Skip wrappers with a single child until we find the node that places things side by side.
+    const LayoutNode* node = resolveLayoutRef(&root);
+    for (int i = 0; node && i < 16; i++) {
+        const auto& type = node->getType();
+        if ((type == "container" || type == "dock" || type == "array") && node->getChildren().size() == 1)
+            node = resolveLayoutRef(&node->getChildren().front());
+        else
+            break;
+    }
+    if (!node || node->getChildren().size() < 2)
+        return root;
+    const auto& type = node->getType();
+    if (type != "dock" && type != "array" && type != "container")
+        return root; // e.g. the pack already uses tabs at the top level
+
+    // Split its children into the parts with maps and the parts without.
+    std::list<LayoutNode> items;
+    std::list<LayoutNode> maps;
+    for (const auto& child: node->getChildren()) {
+        if (containsMap(child))
+            maps.push_back(child);
+        else
+            items.push_back(child);
+    }
+    if (items.empty() || maps.empty())
+        return root;
+
+    _splitPageNames = {"Items", "Maps"};
+    if (_splitPage >= (int)_splitPageNames.size())
+        _splitPage = 0;
+    auto& part = _splitPage == 0 ? items : maps;
+    if (part.size() == 1)
+        return part.front();
+    return LayoutNode::MakeArray(std::move(part), true);
 }
 
 void TrackerView::render(Renderer renderer, int offX, int offY)
@@ -408,6 +525,15 @@ std::list< std::pair<std::string,std::string> > TrackerView::getHints() const
     for (auto& hint: _missedHints) {
         hints.push_back(hint);
     }
+    if (_splitEnabled) {
+        // tabs of the page that is not shown right now
+        for (const auto& [page, names]: _splitActiveTabs) {
+            if (page == _builtSplitPage)
+                continue;
+            for (const auto& name: names)
+                hints.emplace_back("ActivateTab", name);
+        }
+    }
     return hints;
 }
 
@@ -450,6 +576,12 @@ void TrackerView::updateLayout(const std::string& layout)
     for (const auto tab: _tabs) {
         auto name = tab->getActiveTabName();
         if (!name.empty()) _activeTabs.push_back(name);
+    }
+    if (_splitEnabled) {
+        // each page remembers its own tabs
+        if (_builtSplitPage >= 0)
+            _splitActiveTabs[_builtSplitPage] = _activeTabs;
+        _activeTabs = _splitActiveTabs[_splitPage];
     }
     
     // clear ui
