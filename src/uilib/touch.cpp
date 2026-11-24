@@ -54,14 +54,14 @@ void Ui::handleFingerEvent(const SDL_Event& ev)
         auto it = _windows.find(tf.windowID);
         if (it != _windows.end())
             win = it->second;
-        else if (!_windows.empty() && _touchState == TouchState::NONE)
+        else if (!_windows.empty() && _touchState == TouchState::Idle)
             win = _windows.begin()->second; // single window (Android)
         else
             win = touchWindow();
     }
     if (!win)
         return;
-    if (_touchState == TouchState::NONE)
+    if (_touchState == TouchState::Idle)
         _touchWindowId = win->getID();
     else if (win->getID() != _touchWindowId)
         return; // gesture belongs to another window
@@ -81,22 +81,22 @@ void Ui::handleFingerEvent(const SDL_Event& ev)
             else
                 *fingerIt = {tf.fingerId, x, y};
 
-            if (_fingers.size() == 1 && _touchState == TouchState::NONE) {
-                _touchState = TouchState::PENDING;
+            if (_fingers.size() == 1 && _touchState == TouchState::Idle) {
+                _touchState = TouchState::Pending;
                 _touchStartTicks = SDL_GetTicks();
                 _touchStartX = _touchSentX = x;
                 _touchStartY = _touchSentY = y;
             } else if (_fingers.size() == 2 &&
-                    (_touchState == TouchState::PENDING || _touchState == TouchState::DRAG)) {
+                    (_touchState == TouchState::Pending || _touchState == TouchState::Dragging)) {
                 // second finger: start pinch / two finger pan
-                _touchState = TouchState::PINCH;
+                _touchState = TouchState::Pinching;
                 const auto& a = _fingers[0];
                 const auto& b = _fingers[1];
                 _pinchDist = fingerDistance(a.x, a.y, b.x, b.y);
                 _touchSentX = (a.x + b.x) / 2;
                 _touchSentY = (a.y + b.y) / 2;
             } else if (_fingers.size() > 2) {
-                _touchState = TouchState::IGNORE;
+                _touchState = TouchState::Ignoring;
             }
             break;
         }
@@ -107,12 +107,12 @@ void Ui::handleFingerEvent(const SDL_Event& ev)
             fingerIt->x = x;
             fingerIt->y = y;
 
-            if (_touchState == TouchState::PENDING) {
+            if (_touchState == TouchState::Pending) {
                 const float slop = Touch::SLOP_DP;
                 if (fingerDistance(_touchStartX, _touchStartY, x, y) > slop)
-                    _touchState = TouchState::DRAG;
+                    _touchState = TouchState::Dragging;
             }
-            if (_touchState == TouchState::DRAG) {
+            if (_touchState == TouchState::Dragging) {
                 const int dx = (int)std::lround(x - _touchSentX);
                 const int dy = (int)std::lround(y - _touchSentY);
                 if (dx || dy) {
@@ -120,7 +120,7 @@ void Ui::handleFingerEvent(const SDL_Event& ev)
                     _touchSentX += (float)dx;
                     _touchSentY += (float)dy;
                 }
-            } else if (_touchState == TouchState::PINCH && _fingers.size() >= 2) {
+            } else if (_touchState == TouchState::Pinching && _fingers.size() >= 2) {
                 const auto& a = _fingers[0];
                 const auto& b = _fingers[1];
                 const float cx = (a.x + b.x) / 2;
@@ -148,15 +148,15 @@ void Ui::handleFingerEvent(const SDL_Event& ev)
             if (fingerIt != _fingers.end())
                 _fingers.erase(fingerIt);
 
-            if (_touchState == TouchState::PENDING && _fingers.empty()) {
+            if (_touchState == TouchState::Pending && _fingers.empty()) {
                 // tap
                 touchClick(win, (int)_touchStartX, (int)_touchStartY, BUTTON_LEFT);
-            } else if (_touchState == TouchState::PINCH && !_fingers.empty()) {
+            } else if (_touchState == TouchState::Pinching && !_fingers.empty()) {
                 // lifting one finger of a pinch should not turn into a drag jump
-                _touchState = TouchState::IGNORE;
+                _touchState = TouchState::Ignoring;
             }
             if (_fingers.empty())
-                _touchState = TouchState::NONE;
+                _touchState = TouchState::Idle;
             break;
         }
 
@@ -167,11 +167,11 @@ void Ui::handleFingerEvent(const SDL_Event& ev)
 
 void Ui::updateTouch()
 {
-    if (_touchState != TouchState::PENDING)
+    if (_touchState != TouchState::Pending)
         return;
     if (SDL_GetTicks() - _touchStartTicks < Touch::LONG_PRESS_MS)
         return;
-    _touchState = TouchState::LONG_PRESS;
+    _touchState = TouchState::LongPressed;
     if (Window* win = touchWindow())
         touchClick(win, (int)_touchStartX, (int)_touchStartY, BUTTON_RIGHT);
 }

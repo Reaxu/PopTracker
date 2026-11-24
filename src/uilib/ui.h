@@ -44,19 +44,19 @@ protected:
 
     // touch gesture state, see touch.cpp
     enum class TouchState {
-        NONE,       ///< no finger down
-        PENDING,    ///< one finger down, could become tap, long press or drag
-        DRAG,       ///< one finger moving: pan/scroll
-        PINCH,      ///< two fingers: zoom + pan
-        LONG_PRESS, ///< long press fired (right click), wait for release
-        IGNORE,     ///< ignore until all fingers are up
+        Idle,        ///< no finger down
+        Pending,     ///< one finger down, could become tap, long press or drag
+        Dragging,    ///< one finger moving: pan/scroll
+        Pinching,    ///< two fingers: zoom + pan
+        LongPressed, ///< long press fired (right click), wait for release
+        Ignoring,    ///< ignore until all fingers are up
     };
     struct Finger {
         SDL_FingerID id;
         float x, y; ///< current position in logical window coordinates
     };
     std::vector<Finger> _fingers;
-    TouchState _touchState = TouchState::NONE;
+    TouchState _touchState = TouchState::Idle;
     Window::ID _touchWindowId = 0;
     uint32_t _touchStartTicks = 0;
     float _touchStartX = 0, _touchStartY = 0;
