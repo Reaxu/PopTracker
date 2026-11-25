@@ -620,7 +620,7 @@ void DefaultTrackerWindow::showMenu()
             entries.push_back({MENU_TOGGLE_SPLIT, 0,
                     _splitMode ? "Show items and maps together" : "Show items and maps separately"});
         entries.push_back({MENU_TOGGLE_VISIBILITY, 0,
-                _menuLocationsHidden ? "Show cleared locations" : "Hide cleared locations"});
+                _menuLocationsHidden ? "Show cleared / blocked locations" : "Hide cleared / blocked locations"});
         entries.push_back({MENU_SAVE_STATE, 0, "Export state..."});
         entries.push_back({MENU_LOAD_STATE, 0, "Import state..."});
         bool atHeader = false;

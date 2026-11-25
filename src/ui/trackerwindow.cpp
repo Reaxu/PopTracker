@@ -48,6 +48,14 @@ void TrackerWindow::setTracker([[maybe_unused]] Tracker* tracker)
 void TrackerWindow::setTracker(Tracker* tracker, const std::string& layout)
 {
     if (!tracker) setAutoTrackerState(-1, AutoTracker::State::Unavailable, "", "");
+    // same tracker, different layout (e.g. phone rotated): keep the selected tabs
+    std::list<std::string> activeTabs;
+    if (_view && tracker && _view->getTracker() == tracker) {
+        for (const auto& hint: _view->getHints()) {
+            if (hint.first == "ActivateTab")
+                activeTabs.push_back(hint.second);
+        }
+    }
     if (_zoomView) {
         removeChild(_zoomView);
         delete _zoomView; // deletes _view
@@ -79,6 +87,9 @@ void TrackerWindow::setTracker(Tracker* tracker, const std::string& layout)
         } else {
             addChild(_view);
         }
+
+        if (!activeTabs.empty())
+            _view->restoreActiveTabs(activeTabs);
 
         _view->onMinSizeChanged += {this, [this](void*) {
             if (_zoomView) {

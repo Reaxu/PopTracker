@@ -42,6 +42,9 @@ public:
     /// number of pages the current layout splits into (0 = not split)
     int getSplitPageCount() const { return (int)_splitPageNames.size(); }
     const std::vector<std::string>& getSplitPageNames() const { return _splitPageNames; }
+    /// Select tabs by name, e.g. the ones that were active before the layout got swapped (rotation).
+    /// Applies to whatever page shows those tabs, also later.
+    void restoreActiveTabs(const std::list<std::string>& names);
     /// emitted when the pages changed after a (re)layout
     Signal<> onSplitChanged;
     void setHideUnreachableLocations(bool hide);

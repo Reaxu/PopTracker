@@ -47,6 +47,7 @@ public:
     }
 
     void relayout() { // TODO: virtual?
+        calcMinMax(); // children may have changed since the last layout
         if (!_children.empty()) {
             // sum up all hgrow and resize children based on their hgrow
             int totalHGrow = 0;

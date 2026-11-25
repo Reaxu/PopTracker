@@ -1,4 +1,5 @@
 #include "trackerview.h"
+#include "../uilib/touch.h"
 #include <string>
 #include <vector>
 #include <fmt/format.h>
@@ -343,14 +344,27 @@ void TrackerView::relayout()
     const LayoutNode node = getRootNode();
     _relayoutRequired = false;
     _tracker->onUiHint -= this; // stop recording hints
+    if (Touch::enabled()) {
+        // Min size is only ever grown by addChild; the new layout may be smaller (e.g. one page of a split
+        // layout after showing everything). The ZoomView fits whatever we end up with.
+        _minSize = {0, 0};
+        _maxSize = Size::UNDEFINED;
+    }
     if (node.getType() != "") addLayoutNode(this, node);
-    if (_splitEnabled) {
-        // tab switches requested (e.g. by auto tracking) while this page was not shown
-        for (const auto& name: _splitTabHints) {
-            for (auto tab: _tabs)
-                tab->setActiveTab(name);
+    // tab switches requested (e.g. by auto tracking) while this page was not shown, or restored after rotation
+    for (auto it = _splitTabHints.begin(); it != _splitTabHints.end();) {
+        bool applied = false;
+        for (auto tab: _tabs) {
+            if (tab->setActiveTab(*it))
+                applied = true;
         }
-        _splitTabHints.clear();
+        // keep names for tabs on the other page until that page gets shown
+        if (applied || !_splitEnabled)
+            it = _splitTabHints.erase(it);
+        else
+            ++it;
+    }
+    if (_splitEnabled) {
         _builtSplitPage = _splitPageNames.empty() ? -1 : _splitPage;
         _tracker->onUiHint += { this, [this](void*, const std::string& name, const std::string& value) {
             if (name == "ActivateTab") {
@@ -376,6 +390,14 @@ void TrackerView::relayout()
     updateLocations();
     if (_splitPageNames != oldPageNames)
         onSplitChanged.emit(this);
+}
+
+void TrackerView::restoreActiveTabs(const std::list<std::string>& names)
+{
+    for (const auto& name: names) {
+        _splitTabHints.remove(name);
+        _splitTabHints.push_back(name);
+    }
 }
 
 void TrackerView::setSplitMode(bool enabled, int page)
@@ -534,6 +556,9 @@ std::list< std::pair<std::string,std::string> > TrackerView::getHints() const
                 hints.emplace_back("ActivateTab", name);
         }
     }
+    // tab selections not applied yet because their page was not shown (newest last, so they win)
+    for (const auto& name: _splitTabHints)
+        hints.emplace_back("ActivateTab", name);
     return hints;
 }
 
